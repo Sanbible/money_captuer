@@ -1,0 +1,9 @@
+discord.py>=2.6,<3
+openai>=1.40
+opencv-python-headless>=4.8
+gspread>=6.0
+python-dotenv>=1.0
+Pillow>=10.0
+
+# dev / tests
+pytest>=8.0
