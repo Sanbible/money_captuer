@@ -7,6 +7,7 @@
   --brand: #4f46e5;
   --brand-ink: #ffffff;
   --discord: #5865f2;
+  --series-1: #2a78d6;  /* สีกราฟ (dataviz reference palette slot 1) */
   --danger: #d92d20;
   --warn-bg: #fff7e6;
   --warn-ink: #8a5a00;
@@ -25,6 +26,7 @@
     --muted: #98a2b3;
     --line: #2a3040;
     --brand: #7c74ff;
+    --series-1: #3987e5;
     --warn-bg: #3a2c0b;
     --warn-ink: #f5c86b;
     --ok-bg: #0d2f22;

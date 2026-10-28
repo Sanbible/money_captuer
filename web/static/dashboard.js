@@ -48,7 +48,7 @@
       renderRows(rows);
       $("total").textContent = baht(summary.total);
       $("count").textContent = rows.length.toLocaleString("th-TH");
-      MCCharts.render(summary, config.categories);
+      MCCharts.render(summary);
     } catch (e) {
       if (seq === loadSeq) pageError(`โหลดข้อมูลไม่สำเร็จ: ${e.message}`);
     }
