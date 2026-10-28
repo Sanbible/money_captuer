@@ -1,2 +1,50 @@
 <!doctype html>
-<html lang="th"><head><meta charset="utf-8"><title>Money Captuer</title></head><body></body></html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Money Captuer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="hero">
+    <div class="card">
+      <h1>Money <span style="color: var(--brand)">Captuer</span></h1>
+      <p class="muted">จดรายจ่ายจากสลิปโอนเงินอัตโนมัติ แล้วดูสรุปเป็นกราฟ</p>
+      <ol class="steps">
+        <li>อัปโหลดรูปสลิป (หรือส่งเข้าบอท Discord)</li>
+        <li>ระบบอ่านยอดเงิน วันที่ และผู้รับให้เอง</li>
+        <li>เลือกหมวด แล้วดูกราฟรายจ่ายรายเดือน</li>
+      </ol>
+      <button id="login-discord" class="btn btn-discord btn-block" type="button">เข้าสู่ระบบด้วย Discord</button>
+      <p id="message" class="notice notice-error hidden" role="alert"></p>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="/static/app.js"></script>
+  <script>
+    const message = document.getElementById("message");
+    const showError = (text) => { message.textContent = text; message.classList.remove("hidden"); };
+
+    MC.session().then((s) => { if (s) location.replace("/dashboard"); }).catch((e) => showError(e.message));
+
+    document.getElementById("login-discord").addEventListener("click", async (event) => {
+      event.currentTarget.disabled = true;
+      try {
+        const { supabase } = await MC.init();
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: "discord",
+          options: { redirectTo: `${location.origin}/dashboard` },
+        });
+        if (error) throw error;
+      } catch (e) {
+        event.currentTarget.disabled = false;
+        showError(`เข้าสู่ระบบไม่สำเร็จ: ${e.message}`);
+      }
+    });
+  </script>
+</body>
+</html>

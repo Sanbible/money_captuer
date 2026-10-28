@@ -1,2 +1,140 @@
 <!doctype html>
-<html lang="th"><head><meta charset="utf-8"><title>Money Captuer</title></head><body></body></html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>รายจ่ายของฉัน · Money Captuer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="/dashboard">Money <span>Captuer</span></a>
+      <span id="user" class="user"></span>
+      <a class="btn btn-small" href="/settings">ตั้งค่า</a>
+      <button id="logout" class="btn btn-small" type="button">ออกจากระบบ</button>
+    </div>
+  </header>
+
+  <main class="container stack">
+    <div class="toolbar">
+      <div class="field">
+        <label for="month">เดือน</label>
+        <input id="month" type="month">
+      </div>
+      <div class="spacer"></div>
+      <button id="open-upload" class="btn btn-primary" type="button">+ อัปโหลดสลิป</button>
+    </div>
+
+    <p id="page-error" class="notice notice-error hidden" role="alert"></p>
+
+    <section class="stats">
+      <div class="card">
+        <div class="muted">รายจ่ายเดือนนี้</div>
+        <div id="total" class="stat-value">–</div>
+      </div>
+      <div class="card">
+        <div class="muted">จำนวนรายการ</div>
+        <div id="count" class="stat-value">–</div>
+      </div>
+    </section>
+
+    <section class="charts">
+      <div class="card">
+        <h2 class="muted" style="font-size: 1rem">แยกตามหมวด</h2>
+        <div class="chart-box"><canvas id="chart-category" aria-label="กราฟรายจ่ายแยกตามหมวด"></canvas></div>
+        <p id="chart-empty" class="empty hidden">ยังไม่มีข้อมูลเดือนนี้</p>
+      </div>
+      <div class="card">
+        <h2 class="muted" style="font-size: 1rem">ย้อนหลัง 6 เดือน</h2>
+        <div class="chart-box"><canvas id="chart-monthly" aria-label="กราฟรายจ่ายรายเดือน"></canvas></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 style="font-size: 1.1rem; margin-bottom: 8px">รายการ</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>วันที่</th><th>ผู้รับ</th><th>หมวด</th><th class="num">จำนวนเงิน</th><th>ที่มา</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p id="empty" class="empty hidden">ยังไม่มีรายการเดือนนี้ — อัปโหลดสลิปแรกได้เลย</p>
+    </section>
+  </main>
+
+  <dialog id="upload-dialog" aria-labelledby="upload-title">
+    <div class="dialog-head">
+      <h2 id="upload-title">เพิ่มรายจ่าย</h2>
+      <button id="close-upload" class="btn btn-small" type="button" aria-label="ปิด">✕</button>
+    </div>
+    <div class="dialog-body">
+      <!-- ขั้นที่ 1: เลือกรูป -->
+      <div id="step-pick">
+        <div class="field">
+          <label for="slip-file">รูปสลิป (PNG / JPEG ไม่เกิน 10 MB)</label>
+          <input id="slip-file" type="file" accept="image/png,image/jpeg">
+        </div>
+        <button id="manual-entry" class="btn btn-small" type="button">กรอกเองโดยไม่ใช้สลิป</button>
+      </div>
+
+      <!-- ขั้นที่ 2: กำลังอ่าน -->
+      <div id="step-reading" class="hidden" style="text-align: center">
+        <div class="spinner"></div>
+        <p>กำลังอ่านสลิป… อาจใช้เวลาสักครู่</p>
+      </div>
+
+      <!-- ขั้นที่ 3: ตรวจ/แก้ แล้วบันทึก -->
+      <form id="step-form" class="hidden">
+        <img id="preview" class="preview hidden" alt="รูปสลิป">
+        <p id="form-notice" class="notice hidden"></p>
+        <div class="row">
+          <div class="field">
+            <label for="f-amount">จำนวนเงิน (บาท)</label>
+            <input id="f-amount" type="number" inputmode="decimal" min="0.01" step="0.01" required>
+          </div>
+          <div class="field">
+            <label for="f-category">หมวด</label>
+            <select id="f-category" required></select>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="f-date">วันที่</label>
+            <input id="f-date" type="date" required>
+          </div>
+          <div class="field">
+            <label for="f-time">เวลา</label>
+            <input id="f-time" type="time">
+          </div>
+        </div>
+        <div class="field">
+          <label for="f-receiver">ผู้รับ</label>
+          <input id="f-receiver" maxlength="200">
+        </div>
+        <div class="field">
+          <label for="f-note">โน้ต</label>
+          <input id="f-note" maxlength="500">
+        </div>
+        <p id="save-error" class="notice notice-error hidden" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="cancel-upload" class="btn" type="button">ยกเลิก</button>
+          <button id="save" class="btn btn-primary" type="submit">บันทึก</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="/static/app.js"></script>
+  <script src="/static/charts.js"></script>
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>

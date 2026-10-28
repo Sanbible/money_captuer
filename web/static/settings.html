@@ -1,2 +1,57 @@
 <!doctype html>
-<html lang="th"><head><meta charset="utf-8"><title>Money Captuer</title></head><body></body></html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ตั้งค่า · Money Captuer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="/dashboard">Money <span>Captuer</span></a>
+      <a class="btn btn-small" href="/dashboard">กลับไปหน้ารายจ่าย</a>
+    </div>
+  </header>
+
+  <main class="container stack">
+    <section class="card stack">
+      <h1 style="font-size: 1.3rem">บัญชีของฉัน</h1>
+      <div>
+        <div class="muted">ชื่อ / อีเมล</div>
+        <div id="name">–</div>
+      </div>
+      <div>
+        <div class="muted">วิธีเข้าสู่ระบบที่ผูกไว้</div>
+        <ul id="providers" style="margin: 4px 0 0; padding-left: 20px"></ul>
+      </div>
+      <p id="message" class="notice hidden" role="status"></p>
+      <div>
+        <button id="logout" class="btn" type="button">ออกจากระบบ</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="/static/app.js"></script>
+  <script>
+    (async () => {
+      const PROVIDER_NAMES = { discord: "Discord", google: "Google", email: "อีเมล" };
+      let session;
+      try {
+        session = await MC.requireSession();
+      } catch {
+        return;
+      }
+      const user = session.user;
+      document.getElementById("name").textContent = MC.displayName(user);
+      document.getElementById("providers").replaceChildren(
+        ...(user.identities || []).map((i) => MC.el("li", { textContent: PROVIDER_NAMES[i.provider] || i.provider })),
+      );
+      document.getElementById("logout").addEventListener("click", MC.signOut);
+    })();
+  </script>
+</body>
+</html>
