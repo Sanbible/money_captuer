@@ -1,7 +1,7 @@
 # Render Blueprint — New → Blueprint → เลือก repo นี้ (ค่า sync: false ต้องกรอกเองในหน้า Render)
 services:
   - type: web
-    name: money-captuer
+    name: money-capture
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
