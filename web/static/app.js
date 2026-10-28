@@ -16,6 +16,19 @@ const MC = (() => {
     return ready;
   }
 
+  // วิธี login ที่เปิดไว้ใน Supabase ({discord: true, google: false, email: true, ...}) — ใช้ซ่อนปุ่มที่ยังไม่ได้ตั้งค่า
+  let providersReady = null;
+  function providers() {
+    providersReady ??= init()
+      .then(({ config }) =>
+        fetch(`${config.supabase_url}/auth/v1/settings`, { headers: { apikey: config.supabase_anon_key } }),
+      )
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((s) => s.external || {})
+      .catch(() => ({ discord: true }));
+    return providersReady;
+  }
+
   async function session() {
     const { supabase } = await init();
     const { data } = await supabase.auth.getSession(); // ต่ออายุ token ให้เองถ้าใกล้หมด
@@ -90,5 +103,5 @@ const MC = (() => {
     return node;
   }
 
-  return { init, session, requireSession, signOut, api, baht, displayName, el };
+  return { init, providers, session, requireSession, signOut, api, baht, displayName, el };
 })();

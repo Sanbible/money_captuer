@@ -18,31 +18,70 @@
         <li>ระบบอ่านยอดเงิน วันที่ และผู้รับให้เอง</li>
         <li>เลือกหมวด แล้วดูกราฟรายจ่ายรายเดือน</li>
       </ol>
+
       <button id="login-discord" class="btn btn-discord btn-block" type="button">เข้าสู่ระบบด้วย Discord</button>
-      <p id="message" class="notice notice-error hidden" role="alert"></p>
+      <button id="login-google" class="btn btn-block hidden" type="button" style="margin-top: 10px">เข้าสู่ระบบด้วย Google</button>
+
+      <form id="email-form" class="hidden">
+        <div class="divider">หรือใช้อีเมล</div>
+        <div class="field">
+          <label for="email">อีเมล</label>
+          <input id="email" type="email" autocomplete="email" required placeholder="you@example.com">
+        </div>
+        <button id="send-link" class="btn btn-block" type="submit">ส่งลิงก์เข้าสู่ระบบทางอีเมล</button>
+      </form>
+
+      <p id="message" class="notice hidden" role="status" style="margin-top: 12px"></p>
     </div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
   <script src="/static/app.js"></script>
   <script>
-    const message = document.getElementById("message");
-    const showError = (text) => { message.textContent = text; message.classList.remove("hidden"); };
+    const $ = (id) => document.getElementById(id);
+    const show = (kind, text) => {
+      $("message").className = `notice notice-${kind}`;
+      $("message").textContent = text;
+    };
 
-    MC.session().then((s) => { if (s) location.replace("/dashboard"); }).catch((e) => showError(e.message));
+    MC.session().then((s) => { if (s) location.replace("/dashboard"); }).catch((e) => show("error", e.message));
+    MC.providers().then((p) => {
+      $("login-google").classList.toggle("hidden", !p.google);
+      $("email-form").classList.toggle("hidden", !p.email);
+    });
 
-    document.getElementById("login-discord").addEventListener("click", async (event) => {
-      event.currentTarget.disabled = true;
+    async function oauth(provider, button) {
+      button.disabled = true;
       try {
         const { supabase } = await MC.init();
         const { error } = await supabase.auth.signInWithOAuth({
-          provider: "discord",
+          provider,
           options: { redirectTo: `${location.origin}/dashboard` },
         });
         if (error) throw error;
       } catch (e) {
-        event.currentTarget.disabled = false;
-        showError(`เข้าสู่ระบบไม่สำเร็จ: ${e.message}`);
+        button.disabled = false;
+        show("error", `เข้าสู่ระบบไม่สำเร็จ: ${e.message}`);
+      }
+    }
+    $("login-discord").addEventListener("click", (e) => oauth("discord", e.currentTarget));
+    $("login-google").addEventListener("click", (e) => oauth("google", e.currentTarget));
+
+    $("email-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      $("send-link").disabled = true;
+      try {
+        const { supabase } = await MC.init();
+        const { error } = await supabase.auth.signInWithOtp({
+          email: $("email").value.trim(),
+          options: { emailRedirectTo: `${location.origin}/dashboard` },
+        });
+        if (error) throw error;
+        show("ok", "ส่งลิงก์แล้ว เปิดอีเมลแล้วกดลิงก์เพื่อเข้าสู่ระบบ");
+      } catch (e) {
+        $("send-link").disabled = false;
+        const limited = e.status === 429 || /rate limit/i.test(e.message);
+        show("error", limited ? "ส่งอีเมลถี่เกินไป ลองใหม่ในอีกสักครู่" : `ส่งลิงก์ไม่สำเร็จ: ${e.message}`);
       }
     });
   </script>

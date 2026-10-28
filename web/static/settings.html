@@ -32,6 +32,14 @@
         <button id="logout" class="btn" type="button">ออกจากระบบ</button>
       </div>
     </section>
+
+    <section id="link-section" class="card stack hidden">
+      <h2 style="font-size: 1.1rem">เชื่อมบัญชี Discord</h2>
+      <p class="muted">เชื่อมแล้ว สลิปที่ส่งผ่านบอท Discord จะขึ้นในบัญชีนี้อัตโนมัติ (รวมถึงสลิปที่เคยส่งไว้ก่อนหน้า)</p>
+      <div>
+        <button id="link-discord" class="btn btn-discord" type="button">เชื่อมบัญชี Discord</button>
+      </div>
+    </section>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
@@ -45,12 +53,41 @@
       } catch {
         return;
       }
-      const user = session.user;
-      document.getElementById("name").textContent = MC.displayName(user);
-      document.getElementById("providers").replaceChildren(
-        ...(user.identities || []).map((i) => MC.el("li", { textContent: PROVIDER_NAMES[i.provider] || i.provider })),
+      const $ = (id) => document.getElementById(id);
+      const show = (kind, text) => {
+        $("message").className = `notice notice-${kind}`;
+        $("message").textContent = text;
+      };
+      const { supabase } = await MC.init();
+
+      // ข้อมูลล่าสุดจาก Supabase (session ที่เก็บไว้อาจยังไม่มี identity ที่เพิ่งเชื่อม)
+      const { data } = await supabase.auth.getUser();
+      const user = data.user || session.user;
+      const identities = user.identities || [];
+      $("name").textContent = MC.displayName(user);
+      $("providers").replaceChildren(
+        ...identities.map((i) => MC.el("li", { textContent: PROVIDER_NAMES[i.provider] || i.provider })),
       );
-      document.getElementById("logout").addEventListener("click", MC.signOut);
+      $("logout").addEventListener("click", MC.signOut);
+
+      const hasDiscord = identities.some((i) => i.provider === "discord");
+      if (hasDiscord && location.hash.includes("access_token")) show("ok", "เชื่อมบัญชี Discord แล้ว");
+      const enabled = await MC.providers();
+      $("link-section").classList.toggle("hidden", hasDiscord || !enabled.discord);
+
+      $("link-discord").addEventListener("click", async (event) => {
+        event.currentTarget.disabled = true;
+        const { error } = await supabase.auth.linkIdentity({
+          provider: "discord",
+          options: { redirectTo: `${location.origin}/settings` },
+        });
+        if (error) {
+          event.currentTarget.disabled = false;
+          const disabled = /manual linking/i.test(error.message);
+          show("error", disabled ? "ระบบยังไม่เปิดให้เชื่อมบัญชี (ต้องเปิด Manual Linking ใน Supabase)"
+                                 : `เชื่อมบัญชีไม่สำเร็จ: ${error.message}`);
+        }
+      });
     })();
   </script>
 </body>
