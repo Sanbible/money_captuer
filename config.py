@@ -19,16 +19,24 @@ DEFAULT_CATEGORIES = (
 # ตัวแปรที่มีค่าเริ่มต้น ไม่ต้องกรอกก็ได้
 ENV_DEFAULTS = {
     "TYPHOON_LLM_MODEL": DEFAULT_LLM_MODEL,
-    "GOOGLE_CREDENTIALS_FILE": "credentials.json",
 }
 
-ALL_REQUIRED = (
+# บอท Discord (python bot.py)
+BOT_REQUIRED = (
     "DISCORD_TOKEN",
     "DISCORD_CHANNEL_ID",
     "TYPHOON_API_KEY",
-    "GOOGLE_SHEET_ID",
-    "GOOGLE_CREDENTIALS_FILE",
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
 )
+# เว็บ (uvicorn web.app:create_default_app --factory) — ไม่ต้องมี Discord
+WEB_REQUIRED = (
+    "TYPHOON_API_KEY",
+    "SUPABASE_URL",
+    "SUPABASE_ANON_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
+)
+ALL_REQUIRED = BOT_REQUIRED
 
 
 class ConfigError(RuntimeError):
@@ -41,8 +49,10 @@ class Config:
     discord_channel_id: int
     typhoon_api_key: str
     typhoon_llm_model: str
-    google_sheet_id: str
-    google_credentials_file: str
+    supabase_url: str
+    supabase_anon_key: str
+    supabase_service_role_key: str  # ใช้ฝั่ง server เท่านั้น ห้ามส่งไป browser
+    public_base_url: str  # URL ของเว็บ เช่น https://xxx.onrender.com ("" = ไม่ได้ตั้ง)
     categories: tuple[str, ...]
 
 
@@ -74,16 +84,14 @@ def load_config(required: Iterable[str] = ALL_REQUIRED) -> Config:
     if len(categories) > 25:
         raise ConfigError("CATEGORIES มีได้ไม่เกิน 25 หมวด (ข้อจำกัดของ Discord select menu)")
 
-    credentials = _env("GOOGLE_CREDENTIALS_FILE", ENV_DEFAULTS["GOOGLE_CREDENTIALS_FILE"])
-    if not Path(credentials).is_absolute():
-        credentials = str(BASE_DIR / credentials)
-
     return Config(
         discord_token=_env("DISCORD_TOKEN"),
         discord_channel_id=channel_id,
         typhoon_api_key=_env("TYPHOON_API_KEY"),
         typhoon_llm_model=_env("TYPHOON_LLM_MODEL", ENV_DEFAULTS["TYPHOON_LLM_MODEL"]),
-        google_sheet_id=_env("GOOGLE_SHEET_ID"),
-        google_credentials_file=credentials,
+        supabase_url=_env("SUPABASE_URL").rstrip("/"),
+        supabase_anon_key=_env("SUPABASE_ANON_KEY"),
+        supabase_service_role_key=_env("SUPABASE_SERVICE_ROLE_KEY"),
+        public_base_url=_env("PUBLIC_BASE_URL").rstrip("/"),
         categories=categories,
     )

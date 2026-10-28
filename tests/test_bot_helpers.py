@@ -1,7 +1,6 @@
 """Unit tests สำหรับ pure helpers ใน bot.py (ไม่ต่อ Discord / Sheets / Typhoon)"""
 from __future__ import annotations
 
-import zoneinfo
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -139,15 +138,6 @@ def test_bkk_now_is_utc_plus_7():
     assert now.utcoffset() == timedelta(hours=7)
     utc_now = datetime.now(timezone.utc)
     assert abs((now - utc_now).total_seconds()) < 5
-
-
-def test_load_bkk_tz_falls_back_without_tzdata(monkeypatch):
-    def boom(key):
-        raise zoneinfo.ZoneInfoNotFoundError(key)
-
-    monkeypatch.setattr(bot, "ZoneInfo", boom)
-    tz = bot.load_bkk_tz()
-    assert datetime(2026, 1, 1, tzinfo=tz).utcoffset() == timedelta(hours=7)
 
 
 # ---------- normalize_slip_date / normalize_slip_time / format_slip_datetime ----------

@@ -16,10 +16,9 @@ import os
 import re
 import sys
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone, tzinfo
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, NoReturn, Sequence, TypeVar
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import discord
 
@@ -27,6 +26,14 @@ import sheets
 import slip_qr
 import slip_reader
 from config import Config, ConfigError, load_config
+from slip_common import (  # noqa: F401 — re-export ให้ tests/test_bot_helpers.py
+    BKK_TZ,
+    bkk_now,
+    load_bkk_tz,
+    normalize_slip_date,
+    normalize_slip_time,
+    parse_amount_input,
+)
 
 # ใช้ชื่อคงที่ (ไม่ใช่ __name__) เพราะตอนรัน `python bot.py` __name__ จะเป็น "__main__"
 log = logging.getLogger("bot")
@@ -52,40 +59,6 @@ FIELD_LIMIT = 1024  # ความยาวสูงสุดของค่า�
 # =====================================================================
 # Pure helpers
 # =====================================================================
-
-BKK_UTC_OFFSET = timedelta(hours=7)
-
-
-def load_bkk_tz() -> tzinfo:
-    """เขตเวลาไทย — Windows มักไม่มี tzdata จึง fallback เป็น UTC+7 คงที่ (ไทยไม่มี DST)"""
-    try:
-        return ZoneInfo("Asia/Bangkok")
-    except (ZoneInfoNotFoundError, ValueError):
-        return timezone(BKK_UTC_OFFSET, "+07")
-
-
-BKK_TZ = load_bkk_tz()
-
-
-def bkk_now() -> datetime:
-    """เวลาปัจจุบันตามเวลาไทย (timezone-aware)"""
-    return datetime.now(BKK_TZ)
-
-
-_AMOUNT_RE = re.compile(r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?")
-
-
-def parse_amount_input(text: str) -> float | None:
-    """แปลงยอดที่ผู้ใช้พิมพ์ เช่น "1,234.50", "฿120", "99 บาท" -> float
-
-    คืน None ถ้ารูปแบบไม่ถูก หรือไม่ใช่ตัวเลขบวก (ทศนิยมไม่เกิน 2 ตำแหน่ง, คอมมาต้องคั่นหลักพันถูกต้อง)
-    """
-    s = (text or "").strip().removeprefix("฿").removesuffix("บาท").strip()
-    if not _AMOUNT_RE.fullmatch(s):
-        return None
-    value = float(s.replace(",", ""))
-    return round(value, 2) if value > 0 else None
-
 
 def format_baht(amount: float | None) -> str:
     """1234.5 -> "฿1,234.50" ; None -> "?" """
@@ -139,39 +112,6 @@ def parse_summary_command(content: str, today: date) -> str | None:
     if match is None or not 1 <= int(match.group(2)) <= 12:
         raise ValueError(SUMMARY_USAGE)
     return f"{int(match.group(1)):04d}-{int(match.group(2)):02d}"
-
-
-_DATE_RE = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})")
-_TIME_RE = re.compile(r"(\d{1,2}):(\d{2})(?::\d{2})?")
-
-
-def normalize_slip_date(value: str | None) -> str | None:
-    """ตรวจวันที่จาก LLM -> "YYYY-MM-DD" (ค.ศ.) ; ถ้าปีหลุดมาเป็น พ.ศ. ให้ลบ 543 ; ไม่ถูกต้อง -> None"""
-    if not isinstance(value, str):
-        return None
-    match = _DATE_RE.fullmatch(value.strip())
-    if match is None:
-        return None
-    year, month, day = (int(g) for g in match.groups())
-    if year >= 2400:  # ปี พ.ศ.
-        year -= 543
-    try:
-        return date(year, month, day).isoformat()
-    except ValueError:
-        return None
-
-
-def normalize_slip_time(value: str | None) -> str | None:
-    """ตรวจเวลาจาก LLM -> "HH:MM" ; ไม่ถูกต้อง -> None"""
-    if not isinstance(value, str):
-        return None
-    match = _TIME_RE.fullmatch(value.strip())
-    if match is None:
-        return None
-    hour, minute = int(match.group(1)), int(match.group(2))
-    if hour > 23 or minute > 59:
-        return None
-    return f"{hour:02d}:{minute:02d}"
 
 
 def format_slip_datetime(slip_date: str | None, slip_time: str | None) -> str:

@@ -1,9 +1,15 @@
 discord.py>=2.6,<3
 openai>=1.40
 opencv-python-headless>=4.8
-gspread>=6.0
 python-dotenv>=1.0
 Pillow>=10.0
+gspread>=6.0  # ใช้ถึง Task 8 (ย้ายบอทไป Supabase) แล้วลบ
+
+# เว็บ
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+httpx>=0.27
 
 # dev / tests
 pytest>=8.0
