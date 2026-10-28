@@ -1,4 +1,4 @@
-"""เว็บ Money Captuer — FastAPI เสิร์ฟหน้า HTML (web/static) และ /api/*
+"""เว็บ Money Capture — FastAPI เสิร์ฟหน้า HTML (web/static) และ /api/*
 
 รันในเครื่อง: python -m uvicorn web.app:create_default_app --factory --reload
 ทุก /api/* (ยกเว้น /api/config) ต้องมี `Authorization: Bearer <Supabase access token>`
@@ -73,7 +73,7 @@ Me = Annotated[AuthUser, Depends(current_user)]
 
 def create_app(cfg: Config, *, store: Any, auth: Any, reader: Reader = read_draft) -> FastAPI:
     """store / auth / reader ส่งเข้ามาเพื่อให้เทสต์ใช้ fake ได้"""
-    app = FastAPI(title="Money Captuer", docs_url=None, redoc_url=None)
+    app = FastAPI(title="Money Capture", docs_url=None, redoc_url=None)
     app.state.store, app.state.auth = store, auth
     ocr_slot = asyncio.Semaphore(1)  # Typhoon OCR จำกัด 20 req/min — อ่านทีละใบเหมือนบอท
 

@@ -1,4 +1,4 @@
--- Money Captuer — schema ของ Supabase
+-- Money Capture — schema ของ Supabase
 -- วิธีใช้: Supabase → SQL Editor → New query → วางทั้งไฟล์ → Run (รันซ้ำได้ ไม่ลบข้อมูล)
 
 create table if not exists public.expenses (
