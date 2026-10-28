@@ -4,7 +4,7 @@
 แล้วสรุปเป็นกราฟรายเดือน แต่ละคน login แล้วเห็นเฉพาะรายการของตัวเอง
 
 - **Live URL:** https://money-capture.onrender.com
-- **GitHub:** https://github.com/Sanbible/money_captuer
+- **GitHub:** https://github.com/Sanbible/money_capture
 
 > เว็บใช้ Render แบบฟรี ถ้าไม่มีคนเข้าเกิน 15 นาที เซิร์ฟเวอร์จะหลับ การเปิดครั้งแรกอาจช้าประมาณ 30–50 วินาที
 
@@ -49,7 +49,7 @@ Supabase Postgres (ตาราง expenses) ◀── bot.py (Discord)
 ## โครงสร้างโปรเจกต์
 
 ```
-money_captuer/
+money_capture/
 ├── web/
 │   ├── app.py           # FastAPI: หน้าเว็บ + /api/* (อัปโหลด/บันทึก/ลบ/สรุป)
 │   ├── auth.py          # ตรวจ access token กับ Supabase Auth
