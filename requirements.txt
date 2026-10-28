@@ -3,7 +3,6 @@ openai>=1.40
 opencv-python-headless>=4.8
 python-dotenv>=1.0
 Pillow>=10.0
-gspread>=6.0  # ใช้ถึง Task 8 (ย้ายบอทไป Supabase) แล้วลบ
 
 # เว็บ
 fastapi>=0.115

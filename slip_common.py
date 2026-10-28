@@ -76,7 +76,7 @@ def normalize_slip_time(value: str | None) -> str | None:
 
 
 def normalize_ref(value: Any) -> str:
-    """เลขอ้างอิงธุรกรรม: ตัดช่องว่างและ ' นำหน้า (ค่าที่เคยบังคับเป็นข้อความใน Google Sheets)"""
+    """เลขอ้างอิงธุรกรรม: ตัดช่องว่างและ ' นำหน้า"""
     s = "" if value is None else str(value).strip()
     if s.startswith("'"):
         s = s[1:].strip()

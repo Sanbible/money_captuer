@@ -1,11 +1,12 @@
 """Slip Expense Bot — entry point (python bot.py)
 
 ผู้ใช้ส่งรูปสลิปในช่องที่กำหนด → อ่าน QR (กันบันทึกซ้ำด้วยเลขอ้างอิง) → Typhoon OCR/LLM อ่านยอด →
-ตอบ embed + เมนูเลือกหมวด / ปุ่มแก้ไข / ปุ่มยกเลิก → บันทึกลง Google Sheets แท็บ YYYY-MM
-คำสั่ง `!สรุป` หรือ `!สรุป YYYY-MM` → ยอดรวมแต่ละหมวดของเดือน
+ตอบ embed + เมนูเลือกหมวด / ปุ่มแก้ไข / ปุ่มยกเลิก → บันทึกลง Supabase (ตารางเดียวกับเว็บ)
+คำสั่ง `!สรุป` หรือ `!สรุป YYYY-MM` → ยอดรวมแต่ละหมวดของเดือน (เฉพาะสลิปของคนที่สั่ง)
 
 ส่วนบนของไฟล์เป็น pure helpers (มี unit test ใน tests/test_bot_helpers.py)
 ส่วนล่างเป็นส่วนที่คุยกับ Discord — import ไฟล์นี้ได้โดยไม่ต้องมี .env และไม่สตาร์ตบอท
+บอทไม่รู้จักบัญชีเว็บ: บันทึกด้วย discord_id เท่านั้น แล้วเว็บผูกเข้าบัญชีให้ตอนผู้ใช้ login ด้วย Discord
 """
 from __future__ import annotations
 
@@ -17,15 +18,14 @@ import re
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime
-from pathlib import Path
 from typing import Any, Callable, Mapping, NoReturn, Sequence, TypeVar
 
 import discord
 
-import sheets
 import slip_qr
 import slip_reader
-from config import Config, ConfigError, load_config
+import store
+from config import BOT_REQUIRED, Config, ConfigError, load_config
 from slip_common import (  # noqa: F401 — re-export ให้ tests/test_bot_helpers.py
     BKK_TZ,
     bkk_now,
@@ -42,7 +42,7 @@ T = TypeVar("T")
 
 VIEW_TIMEOUT = 24 * 60 * 60  # ปุ่ม/เมนูใช้ได้ 24 ชม.
 MODAL_TIMEOUT = 30 * 60  # modal ที่เปิดค้างไว้ถูกลบจาก memory หลัง 30 นาที
-SHEETS_TIMEOUT = 90  # วินาที กัน gspread ค้างจนล็อกชีตไว้ตลอด
+DB_TIMEOUT = 30  # วินาที กัน Supabase ค้างจนล็อกไว้ตลอด
 SUMMARY_COMMAND = "!สรุป"
 
 EMOJI_WORKING = "⏳"
@@ -158,11 +158,11 @@ class SlipState:
         )
 
 
-def build_record(state: SlipState, category: str, now: datetime) -> sheets.ExpenseRecord:
+def build_record(state: SlipState, category: str, now: datetime) -> store.NewExpense:
     """สร้างแถวที่จะบันทึก — ไม่มีวันที่บนสลิปใช้วันที่ของ `now` (เวลาไทย)"""
     if state.amount is None:
         raise ValueError("ยังไม่มีจำนวนเงิน")
-    return sheets.ExpenseRecord(
+    return store.NewExpense(
         date=state.date or now.strftime("%Y-%m-%d"),
         time=state.time or "",
         amount=state.amount,
@@ -171,9 +171,30 @@ def build_record(state: SlipState, category: str, now: datetime) -> sheets.Expen
         note=state.note or "",
         bank=slip_qr.bank_name(state.bank_code),
         trans_ref=state.trans_ref or "",
-        recorded_at=now.strftime("%Y-%m-%d %H:%M:%S"),
+        source="discord",
+        discord_id=str(state.author_id),
         discord_link=state.slip_url,
     )
+
+
+UNCATEGORIZED = "ไม่ระบุหมวด"
+
+
+def summarize_by_category(rows: Sequence[Mapping[str, Any]]) -> dict[str, float]:
+    """{หมวด: ยอดรวม} เรียงจากมากไปน้อย"""
+    totals: dict[str, float] = {}
+    for row in rows:
+        category = str(row.get("category") or "").strip() or UNCATEGORIZED
+        totals[category] = totals.get(category, 0.0) + float(row["amount"])
+    ordered = sorted(totals.items(), key=lambda kv: (-kv[1], kv[0]))
+    return {category: round(total, 2) for category, total in ordered}
+
+
+def month_range(month: str) -> tuple[str, str]:
+    """"2026-10" -> ("2026-10-01", "2026-11-01") — ช่วง [start, end) ของเดือน"""
+    year, mon = int(month[:4]), int(month[5:7])
+    end = date(year + 1, 1, 1) if mon == 12 else date(year, mon + 1, 1)
+    return date(year, mon, 1).isoformat(), end.isoformat()
 
 
 def format_summary(month: str, totals: Mapping[str, float] | None) -> str:
@@ -181,7 +202,7 @@ def format_summary(month: str, totals: Mapping[str, float] | None) -> str:
     if not totals:
         return f"ยังไม่มีข้อมูลเดือน {month}"
     items = sorted(totals.items(), key=lambda kv: (-kv[1], kv[0]))
-    lines = [f"• {category or 'ไม่ระบุหมวด'}: {format_baht(total)}" for category, total in items]
+    lines = [f"• {category or UNCATEGORIZED}: {format_baht(total)}" for category, total in items]
     lines.append(f"**รวมทั้งเดือน: {format_baht(sum(totals.values()))}**")
     return "\n".join(lines)
 
@@ -346,10 +367,11 @@ class SlipView(discord.ui.View):
             color = discord.Color.blurple()
         return build_slip_embed(self.state, title="🧾 สลิปโอนเงิน", color=color, footer=footer)
 
-    def saved_embed(self, category: str, tab: str) -> discord.Embed:
+    def saved_embed(self, category: str) -> discord.Embed:
         embed = build_slip_embed(self.state, title="✅ บันทึกแล้ว", color=discord.Color.green())
         embed.add_field(name="หมวด", value=_clip(category))
-        embed.add_field(name="แท็บ", value=_clip(tab))
+        if self.bot.cfg.public_base_url:
+            embed.add_field(name="ดูในเว็บ", value=f"{self.bot.cfg.public_base_url}/dashboard")
         return embed
 
     # ---------- discord.ui.View hooks ----------
@@ -411,22 +433,22 @@ class SlipView(discord.ui.View):
             return
         self._busy = True  # ตั้งก่อน await แรก -> กดซ้ำจะไม่บันทึกสองแถว
         try:
-            await interaction.response.defer()  # ack ภายใน 3 วิ ก่อนเรียก Sheets ที่ช้า
+            await interaction.response.defer()  # ack ภายใน 3 วิ ก่อนเรียกฐานข้อมูล
             record = build_record(self.state, category, bkk_now())
             try:
-                tab = await self.bot.save_expense(record)
+                saved = await self.bot.save_expense(record)
             except Exception as e:
-                log.error("บันทึกลง Sheets ไม่สำเร็จ amount=%s ref=%s: %s", record.amount, record.trans_ref, e)
+                log.error("บันทึกลงฐานข้อมูลไม่สำเร็จ amount=%s ref=%s: %s", record.amount, record.trans_ref, e)
                 await self._edit(interaction, embed=self.pending_embed(), view=self)  # รีเซ็ตเมนูให้ลองใหม่ได้
-                await send_ephemeral(interaction, "บันทึกลง Google Sheets ไม่สำเร็จ ลองเลือกหมวดอีกครั้ง")
+                await send_ephemeral(interaction, "บันทึกลงฐานข้อมูลไม่สำเร็จ ลองเลือกหมวดอีกครั้ง")
                 return
 
             self._close()
-            if tab is None:
+            if not saved:
                 await self._edit(interaction, content="สลิปนี้บันทึกไปแล้ว", view=self)
                 return
-            log.info("บันทึกแล้ว amount=%.2f ref=%s tab=%s", record.amount, record.trans_ref, tab)
-            await self._edit(interaction, content=None, embed=self.saved_embed(category, tab), view=self)
+            log.info("บันทึกแล้ว amount=%.2f ref=%s", record.amount, record.trans_ref)
+            await self._edit(interaction, content=None, embed=self.saved_embed(category), view=self)
             await self.bot.swap_reaction(self.slip_message, EMOJI_FAIL, EMOJI_OK)
         finally:
             self._busy = False
@@ -460,13 +482,13 @@ class SlipView(discord.ui.View):
 # =====================================================================
 
 class SlipBot(discord.Client):
-    def __init__(self, cfg: Config, sheet: sheets.ExpenseSheet) -> None:
+    def __init__(self, cfg: Config, expense_store: store.ExpenseStore) -> None:
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
         self.cfg = cfg
-        self.sheet = sheet
-        self._sheet_lock = asyncio.Lock()  # gspread ทีละคำสั่ง (กันสร้างแท็บซ้อน / เช็กซ้ำ+append ให้เป็นก้อนเดียว)
+        self.store = expense_store
+        self._db_lock = asyncio.Lock()  # insert ทีละรายการ (unique index ใน DB กันสลิปซ้ำอีกชั้น)
         self._ocr_slot = asyncio.Semaphore(1)  # Typhoon OCR จำกัด 2 req/s, 20 req/min — อ่านทีละใบ
 
     # ---------- events ----------
@@ -518,7 +540,7 @@ class SlipBot(discord.Client):
 
         qr = await asyncio.to_thread(slip_qr.read_slip_qr, data)
         trans_ref = qr.get("trans_ref") if qr else None
-        if trans_ref and await self.is_duplicate(trans_ref):
+        if trans_ref and await self.is_duplicate(trans_ref, str(message.author.id)):
             log.info("สลิปซ้ำ ref=%s", trans_ref)
             await self._reply(message, "สลิปนี้บันทึกไปแล้ว")
             return True
@@ -537,49 +559,40 @@ class SlipBot(discord.Client):
         view.message = await message.reply(embed=view.pending_embed(), view=view, mention_author=False)
         return state.amount is not None
 
-    # ---------- Google Sheets ----------
+    # ---------- Supabase ----------
 
-    async def _sheet_call(self, fn: Callable[..., T], *args: Any) -> T:
-        async with self._sheet_lock:
-            return await asyncio.wait_for(asyncio.to_thread(fn, *args), SHEETS_TIMEOUT)
+    async def _db_call(self, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+        return await asyncio.wait_for(asyncio.to_thread(fn, *args, **kwargs), DB_TIMEOUT)
 
-    async def is_duplicate(self, trans_ref: str) -> bool:
-        """เช็กว่าเลขอ้างอิงนี้บันทึกแล้วหรือยัง — ถ้า Sheets มีปัญหาให้ log แล้วถือว่าไม่ซ้ำ (ไม่บล็อกผู้ใช้)"""
+    async def is_duplicate(self, trans_ref: str, discord_id: str) -> bool:
+        """คนนี้เคยบันทึกเลขอ้างอิงนี้แล้วหรือยัง — ถ้าฐานข้อมูลมีปัญหาให้ log แล้วถือว่าไม่ซ้ำ (ไม่บล็อกผู้ใช้)"""
         try:
-            return await self._sheet_call(self.sheet.is_duplicate, trans_ref)
+            return await self._db_call(self.store.is_duplicate, trans_ref, discord_id=discord_id)
         except Exception as e:
             log.warning("เช็กสลิปซ้ำไม่สำเร็จ ref=%s: %s", trans_ref, e)
             return False
 
-    async def save_expense(self, record: sheets.ExpenseRecord) -> str | None:
-        """เช็กซ้ำอีกรอบแล้ว append ภายใต้ lock เดียวกัน (กันสลิปเดียวกันถูกส่ง 2 ครั้ง)
-
-        คืนชื่อแท็บที่บันทึก, None ถ้าซ้ำ ; append ล้มเหลว -> raise
-        """
-        async with self._sheet_lock:
-            if record.trans_ref:
-                try:
-                    duplicate = await asyncio.wait_for(
-                        asyncio.to_thread(self.sheet.is_duplicate, record.trans_ref), SHEETS_TIMEOUT
-                    )
-                except Exception as e:
-                    log.warning("เช็กสลิปซ้ำก่อนบันทึกไม่สำเร็จ ref=%s: %s", record.trans_ref, e)
-                    duplicate = False
-                if duplicate:
-                    log.info("สลิปซ้ำตอนบันทึก ref=%s", record.trans_ref)
-                    return None
-            return await asyncio.wait_for(asyncio.to_thread(self.sheet.append_expense, record), SHEETS_TIMEOUT)
+    async def save_expense(self, record: store.NewExpense) -> bool:
+        """insert — False ถ้าซ้ำ (unique index ใน DB) ; ล้มเหลว -> raise"""
+        async with self._db_lock:
+            row = await self._db_call(self.store.insert, record)
+        if row is None:
+            log.info("สลิปซ้ำตอนบันทึก ref=%s", record.trans_ref)
+        return row is not None
 
     async def handle_summary(self, message: discord.Message, month: str) -> None:
+        start, end = month_range(month)
         try:
-            totals = await self._sheet_call(self.sheet.month_summary, month)
+            rows = await self._db_call(
+                self.store.list_expenses, start=start, end=end, discord_id=str(message.author.id)
+            )
         except Exception as e:
             log.error("ดึงสรุปเดือน %s ไม่สำเร็จ: %s", month, e)
-            await self._reply(message, "ดึงข้อมูลจาก Google Sheets ไม่สำเร็จ ลองใหม่อีกครั้ง")
+            await self._reply(message, "ดึงข้อมูลจากฐานข้อมูลไม่สำเร็จ ลองใหม่อีกครั้ง")
             return
         embed = discord.Embed(
             title=f"📊 สรุปรายจ่าย {month}",
-            description=format_summary(month, totals),
+            description=format_summary(month, summarize_by_category(rows)),
             color=discord.Color.teal(),
         )
         await self._reply(message, embed=embed)
@@ -636,28 +649,13 @@ def main() -> None:
     _setup_logging()
 
     try:
-        cfg = load_config()
+        cfg = load_config(required=BOT_REQUIRED)
     except ConfigError as e:
         _fail(f"❌ {e}\nคัดลอก .env.example เป็น .env แล้วกรอกค่าให้ครบ (ดู README.md)")
 
-    credentials = Path(cfg.google_credentials_file)
-    if not credentials.is_file():
-        _fail(
-            f"❌ ไม่พบไฟล์ Google credentials: {credentials}\n"
-            "ดาวน์โหลด JSON key ของ Service Account มาวางตามพาธนี้ "
-            "หรือแก้ GOOGLE_CREDENTIALS_FILE ใน .env ให้ชี้ไปที่ไฟล์ที่ถูกต้อง"
-        )
+    expense_store = store.ExpenseStore(cfg.supabase_url, cfg.supabase_service_role_key)
 
-    try:
-        sheet = sheets.ExpenseSheet(cfg.google_sheet_id, str(credentials))
-    except Exception as e:
-        _fail(
-            f"❌ เปิด Google Sheet ไม่สำเร็จ ({type(e).__name__}: {e})\n"
-            "ตรวจ GOOGLE_SHEET_ID, เปิด Google Sheets API/Drive API แล้ว, "
-            "และแชร์ชีตให้อีเมล service account (client_email ใน credentials.json) เป็น Editor"
-        )
-
-    bot = SlipBot(cfg, sheet)
+    bot = SlipBot(cfg, expense_store)
     try:
         # log_handler=None: ใช้ root logging ที่ตั้งไว้ข้างบน (discord.py ไม่ต้องติด handler ของตัวเอง)
         bot.run(cfg.discord_token, log_handler=None)

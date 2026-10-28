@@ -1,242 +1,162 @@
-# Slip Expense Bot
+# Money Captuer
 
-บอท Discord สำหรับจดรายจ่ายส่วนตัวจากสลิปโอนเงินของธนาคารไทย
+เว็บ + บอท Discord สำหรับจดรายจ่ายส่วนตัวจากสลิปโอนเงินของธนาคารไทย — อัปโหลดรูปสลิป ระบบอ่านยอดเงิน วันที่ และผู้รับให้อัตโนมัติ
+แล้วสรุปเป็นกราฟรายเดือน แต่ละคน login แล้วเห็นเฉพาะรายการของตัวเอง
 
-ส่งรูปสลิปเข้าช่อง Discord ที่กำหนดไว้ → บอทอ่านยอดเงินให้อัตโนมัติ → เลือกหมวดรายจ่ายผ่านปุ่ม/เมนู → บันทึกลง Google Sheet แยกแท็บตามเดือน
+- **Live URL:** _(กำลัง deploy — จะอัปเดตลิงก์ที่นี่)_
+- **GitHub:** https://github.com/Sanbible/money_captuer
 
-> บอทนี้**ไม่ได้ตรวจสอบความถูกต้องของสลิปกับธนาคาร** (ไม่ได้เชื่อมต่อ API ตรวจสลิปปลอมอย่าง SlipOK/EasySlip) มีไว้แค่ช่วยจดบันทึกรายจ่ายเท่านั้น
+> เว็บใช้ Render แบบฟรี ถ้าไม่มีคนเข้าเกิน 15 นาที เซิร์ฟเวอร์จะหลับ การเปิดครั้งแรกอาจช้าประมาณ 30–50 วินาที
 
-## สารบัญ
+## Tech Stack
 
-- [บอทนี้ทำอะไร (Flow)](#บอทนี้ทำอะไร-flow)
-- [สิ่งที่ต้องมี](#สิ่งที่ต้องมี)
-- [ขั้นที่ 1 — ติดตั้งโปรแกรม (Setup)](#ขั้นที่-1--ติดตั้งโปรแกรม-setup)
-- [ขั้นที่ 2 — เตรียมบัญชีต่าง ๆ](#ขั้นที่-2--เตรียมบัญชีต่าง-ๆ)
-- [ขั้นที่ 3 — ตั้งค่าไฟล์ .env](#ขั้นที่-3--ตั้งค่าไฟล์-env)
-- [ขั้นที่ 4 — ทดสอบทีละส่วน](#ขั้นที่-4--ทดสอบทีละส่วน)
-- [วิธีใช้งานบอท](#วิธีใช้งานบอท)
-- [โครงสร้าง Google Sheet](#โครงสร้าง-google-sheet)
-- [ความปลอดภัย / ความเป็นส่วนตัว](#ความปลอดภัย--ความเป็นส่วนตัว)
-- [แก้ปัญหาที่พบบ่อย (Troubleshooting)](#แก้ปัญหาที่พบบ่อย-troubleshooting)
-- [โครงสร้างโปรเจกต์](#โครงสร้างโปรเจกต์)
-
-## บอทนี้ทำอะไร (Flow)
-
-เมื่อผู้ใช้ส่งรูปสลิป (PNG/JPEG) เข้าช่อง Discord ที่กำหนดไว้ บอทจะทำตามขั้นตอนนี้โดยอัตโนมัติ:
-
-1. ขึ้น reaction ⏳ ที่ข้อความสลิป เพื่อบอกว่ากำลังประมวลผล
-2. อ่าน **QR code** บนสลิป (ถ้ามี) เพื่อได้รหัสธนาคารกับเลขอ้างอิงธุรกรรม (ใช้กันบันทึกซ้ำ)
-   - ถ้าสลิปนี้ถูกบันทึกไปแล้ว บอทจะตอบว่า **"สลิปนี้บันทึกไปแล้ว"** แล้วจบ ไม่บันทึกซ้ำ
-3. ส่งรูปไปอ่านข้อความด้วย **Typhoon OCR** แล้วดึงยอดเงิน/วันที่/เวลา/ผู้รับด้วย **Typhoon LLM**
-   - ถ้าอ่านยอดไม่ได้ บอทจะยังให้เลือกหมวดได้ตามปกติ แต่จะเปิดหน้าต่างให้**พิมพ์ยอดเงินเอง**ก่อนบันทึก
-4. บอท reply ข้อความสลิปเป็น embed แสดงยอด/วันที่/ผู้รับ พร้อม
-   - เมนูเลือก **หมวดรายจ่าย** (dropdown)
-   - ปุ่ม **"แก้ไข"** — เปิดหน้าต่างแก้จำนวนเงิน/ผู้รับ/โน้ตก่อนบันทึก
-   - ปุ่ม **"ยกเลิก"**
-   - ปุ่ม/เมนูเหล่านี้กดได้เฉพาะคนที่ส่งสลิปเท่านั้น และจะหมดอายุใน 24 ชั่วโมง
-5. เมื่อเลือกหมวดแล้ว บอทจะบันทึกแถวใหม่ลง Google Sheet ในแท็บของเดือนนั้น (สร้างแท็บให้อัตโนมัติถ้ายังไม่มี) แล้วแก้ข้อความเป็น **"✅ บันทึกแล้ว"**
-6. พิมพ์ `!สรุป` หรือ `!สรุป YYYY-MM` ในช่องเดิม เพื่อดูยอดรวมรายจ่ายแยกตามหมวดของเดือนนั้น
-
-## สิ่งที่ต้องมี
-
-- **Python 3.11 ขึ้นไป** (แนะนำ 3.11 หรือ 3.12) ติดตั้งจาก https://www.python.org/downloads/ (ตอนติดตั้งให้ติ๊ก "Add python.exe to PATH" ด้วย)
-- บัญชี Discord, บัญชี Google, และ API key จาก Typhoon (วิธีเตรียมอยู่ใน [ขั้นที่ 2](#ขั้นที่-2--เตรียมบัญชีต่าง-ๆ))
-- เซิร์ฟเวอร์ Discord ส่วนตัวที่คุณเป็นแอดมิน (สำหรับเชิญบอทเข้าไป)
-
-## ขั้นที่ 1 — ติดตั้งโปรแกรม (Setup)
-
-เปิด **PowerShell** แล้วไปที่โฟลเดอร์โปรเจกต์นี้ (เช่น `cd C:\Users\<ชื่อคุณ>\OneDrive\Desktop\money_captuer`) จากนั้นรันตามลำดับ:
-
-```powershell
-# 1) สร้าง virtual environment (ทำครั้งเดียว)
-python -m venv .venv
-
-# 2) เปิดใช้งาน venv
-.\.venv\Scripts\Activate.ps1
-```
-
-ถ้าขั้นที่ 2 รันไม่ได้ และเจอ error แบบ "...cannot be loaded because running scripts is disabled..." ให้รันคำสั่งนี้ก่อน (ครั้งเดียวต่อเครื่อง) แล้วลองใหม่:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-```
-
-เมื่อ activate สำเร็จ จะเห็น `(.venv)` ขึ้นหน้า prompt จากนั้นติดตั้งไลบรารีที่ต้องใช้:
-
-```powershell
-pip install -r requirements.txt
-```
-
-> **ถ้าไม่อยาก/ไม่สามารถ Activate venv ได้** สามารถเรียกตัวแปลภาษาของ venv ตรง ๆ แทนได้ทุกคำสั่งในคู่มือนี้ เช่น:
-> ```powershell
-> .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-> .\.venv\Scripts\python.exe bot.py
-> ```
-
-## ขั้นที่ 2 — เตรียมบัญชีต่าง ๆ
-
-ต้องเตรียม 3 อย่าง: บอท Discord, Google Service Account + Google Sheet, และ Typhoon API key
-
-### 2.1 สร้างบอท Discord
-
-1. ไปที่ [Discord Developer Portal](https://discord.com/developers/applications) → กด **New Application** → ตั้งชื่อ
-2. ไปที่เมนู **Bot** ทางซ้าย → กด **Reset Token** → คัดลอก token ที่ได้มาเก็บไว้ (จะใช้เป็น `DISCORD_TOKEN`) — **ห้ามแชร์ token นี้ให้ใครเห็น**
-3. ในหน้า Bot เดียวกัน เลื่อนลงไปหา **Privileged Gateway Intents** แล้วเปิด **Message Content Intent** ให้เป็น ON (สำคัญมาก ถ้าไม่เปิดบอทจะอ่านข้อความ/รูปที่ส่งเข้ามาไม่ได้) → กด Save
-4. ไปที่เมนู **OAuth2 → URL Generator**:
-   - ติ๊ก scope: `bot`
-   - ติ๊ก permissions: **View Channels, Send Messages, Read Message History, Add Reactions, Embed Links**
-   - คัดลอก URL ที่ได้ด้านล่าง เปิดในเบราว์เซอร์ แล้วเลือกเซิร์ฟเวอร์ (private server) ของคุณเพื่อเชิญบอทเข้าไป
-5. ใน Discord (แอปจริง) เปิด **Developer Mode**: User Settings → Advanced → เปิด Developer Mode
-6. คลิกขวาที่ช่อง (channel) ที่จะให้บอทอ่านสลิป → **Copy Channel ID** → เก็บไว้เป็น `DISCORD_CHANNEL_ID`
-
-### 2.2 เตรียม Google Sheets (Service Account)
-
-1. ไปที่ [Google Cloud Console](https://console.cloud.google.com/) → สร้างโปรเจกต์ใหม่ (หรือใช้โปรเจกต์เดิม)
-2. ไปที่ **APIs & Services → Library** → ค้นหาและกด **Enable** ทั้งสองตัว: **Google Sheets API** และ **Google Drive API**
-3. ไปที่ **APIs & Services → Credentials** → **Create Credentials → Service Account** → ตั้งชื่อ แล้วกด Done
-4. คลิกเข้า Service Account ที่สร้าง → แท็บ **Keys** → **Add Key → Create new key → JSON** → ไฟล์ JSON จะถูกดาวน์โหลดมา
-5. นำไฟล์ที่ดาวน์โหลดมาเปลี่ยนชื่อเป็น `credentials.json` แล้ววางไว้ใน**โฟลเดอร์โปรเจกต์นี้** (โฟลเดอร์เดียวกับ `bot.py`)
-6. เปิดไฟล์ JSON ด้วย Notepad แล้วหาค่า `"client_email"` (จะหน้าตาประมาณ `xxx@xxx.iam.gserviceaccount.com`) — นี่คืออีเมลของ service account
-7. สร้าง Google Sheet เปล่าขึ้นมา 1 ไฟล์ (sheets.google.com → Blank spreadsheet) → กด **Share** → แชร์ให้อีเมล service account จากขั้นที่ 6 โดยตั้งสิทธิ์เป็น **Editor**
-8. คัดลอก **Sheet ID** จาก URL ของ Google Sheet เก็บไว้เป็น `GOOGLE_SHEET_ID` — Sheet ID คือส่วนที่อยู่ระหว่าง `/d/` กับ `/edit` เช่น:
-
-   ```
-   https://docs.google.com/spreadsheets/d/1AbCDeFGhIjKLmNoPQRstuVWxyz1234567890/edit#gid=0
-                                            └──────────── Sheet ID ────────────┘
-   ```
-
-### 2.3 สมัครใช้งาน Typhoon (OCR + LLM)
-
-1. ไปที่ https://opentyphoon.ai แล้วสมัครสมาชิก (ฟรี)
-2. สร้าง API key ในหน้า dashboard เก็บไว้เป็น `TYPHOON_API_KEY`
-3. บอทนี้ใช้โมเดล `typhoon-ocr` สำหรับอ่านรูปสลิป ซึ่งแผนฟรีมี **rate limit 2 request/วินาที และ 20 request/นาที** — ถ้าส่งสลิปถี่เกินไปอาจเจอ error 429 (ดูวิธีแก้ใน [Troubleshooting](#แก้ปัญหาที่พบบ่อย-troubleshooting))
-
-## ขั้นที่ 3 — ตั้งค่าไฟล์ .env
-
-คัดลอกไฟล์ตัวอย่างเป็น `.env` จริง:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-จากนั้นเปิด `.env` ด้วย Notepad (หรือ editor ใด ๆ) แล้วกรอกค่าที่เตรียมไว้จากขั้นที่ 2:
-
-| ตัวแปร | คำอธิบาย |
+| ส่วน | เทคโนโลยี |
 |---|---|
-| `DISCORD_TOKEN` | token ของบอทจากขั้นที่ 2.1 (ข้อ 2) — **ห้าม commit/แชร์** |
-| `DISCORD_CHANNEL_ID` | Channel ID ที่จะให้บอทอ่านสลิป จากขั้นที่ 2.1 (ข้อ 6) |
-| `TYPHOON_API_KEY` | API key จาก opentyphoon.ai จากขั้นที่ 2.3 |
-| `TYPHOON_LLM_MODEL` | ชื่อโมเดล instruct ของ Typhoon ที่ใช้ดึงยอด/วันที่/ผู้รับจากข้อความ OCR ค่าเริ่มต้นคือ `typhoon-v2.5-30b-a3b-instruct` — ควรเช็กชื่อรุ่นฟรีล่าสุดที่ https://docs.opentyphoon.ai/en/models ก่อนใช้งานจริง เพราะโมเดลอาจถูกเปลี่ยน/อัปเดตชื่อได้ |
-| `GOOGLE_SHEET_ID` | Sheet ID จากขั้นที่ 2.2 (ข้อ 8) |
-| `GOOGLE_CREDENTIALS_FILE` | ชื่อไฟล์ service account JSON ค่าเริ่มต้นคือ `credentials.json` (ไฟล์ต้องอยู่ในโฟลเดอร์โปรเจกต์นี้) |
-| `CATEGORIES` | รายการหมวดรายจ่าย คั่นด้วยจุลภาค `,` แก้ไข/เพิ่ม/ลบได้ตามต้องการ **แต่ต้องมีไม่เกิน 25 หมวด** เพราะเป็นข้อจำกัดของเมนู select ใน Discord |
+| Backend / API | Python 3.12, FastAPI, Uvicorn |
+| หน้าเว็บ | HTML + CSS + JavaScript (ไม่ใช้ framework), Chart.js |
+| Login | Supabase Auth (OAuth ด้วย Discord) ผ่าน supabase-js |
+| ฐานข้อมูล | Supabase Postgres (PostgREST) เปิด Row Level Security |
+| อ่านสลิป | OpenCV (อ่าน QR), Typhoon OCR + Typhoon LLM (ดึงยอด/วันที่/ผู้รับ) |
+| บอท | discord.py |
+| Deploy | Render (web service), GitHub |
+| Test | pytest, FastAPI TestClient, httpx MockTransport |
 
-ตัวอย่างค่าเริ่มต้นของ `CATEGORIES`:
+## ทำอะไรได้บ้าง
+
+- **Login ด้วย Discord** — ไม่ต้องสมัครหรือจำรหัสผ่าน
+- **อัปโหลดสลิป** (PNG/JPEG) → อ่าน QR เพื่อได้เลขอ้างอิงธุรกรรม + OCR อ่านยอด → ตรวจ/แก้ → เลือกหมวด → บันทึก
+- **กันบันทึกซ้ำ** ด้วยเลขอ้างอิงจาก QR (นับเฉพาะข้อมูลของคนเดียวกัน)
+- **Dashboard** — ยอดรวมของเดือน, กราฟแยกตามหมวด, กราฟย้อนหลัง 6 เดือน, ตารางรายการ (ลบได้)
+- **บอท Discord** — ส่งสลิปเข้าช่องที่กำหนดก็บันทึกได้เหมือนกัน และ `!สรุป` ดูยอดรายเดือน
+  รายการจากบอทจะขึ้นในเว็บอัตโนมัติเมื่อ login ด้วยบัญชี Discord เดียวกัน
+
+## สถาปัตยกรรม
 
 ```
-CATEGORIES=อาหาร,เครื่องดื่ม/กาแฟ,เดินทาง,ช้อปปิ้ง,ของใช้,บิล/ค่าบริการ,สุขภาพ,บันเทิง,อื่นๆ
+Browser ──(supabase-js: login ด้วย Discord)──▶ Supabase Auth
+   │  Authorization: Bearer <access token>
+   ▼
+FastAPI (Render) ──▶ slip_qr / slip_reader ──▶ Typhoon API
+   │  ตรวจ token กับ Supabase Auth แล้วกรองทุก query ด้วย user_id
+   ▼
+Supabase Postgres (ตาราง expenses) ◀── bot.py (Discord)
 ```
 
-## ขั้นที่ 4 — ทดสอบทีละส่วน
-
-ทำตามลำดับนี้ ทดสอบให้ผ่านทีละขั้นก่อนไปขั้นต่อไป (รันในโฟลเดอร์โปรเจกต์ โดย activate venv ไว้แล้ว — ถ้าไม่ได้ activate ให้ใช้ `.\.venv\Scripts\python.exe` แทน `python`)
-
-### 4.1 รัน unit tests (ไม่ต้องมี .env หรือ credentials จริง)
-
-```powershell
-python -m pytest -q
-```
-
-ควรเห็นผลทุกเทสต์ผ่าน (PASSED) ทั้งหมด
-
-### 4.2 ทดสอบอ่านสลิป (ต้องมี `TYPHOON_API_KEY` ใน `.env` แล้ว)
-
-เตรียมรูปสลิป 1 ใบ (เช่น `C:\Users\<ชื่อคุณ>\Downloads\slip.jpg`) แล้วรัน:
-
-```powershell
-python slip_reader.py path\to\slip.jpg
-```
-
-บอทจะพิมพ์ JSON ของยอดเงิน/วันที่/เวลา/ผู้รับที่อ่านได้ออกมาทางหน้าจอ ใช้ตรวจว่า OCR/LLM ทำงานถูกต้องก่อนไปขั้นต่อไป
-
-### 4.3 ทดสอบเชื่อม Google Sheet (ต้องมี `GOOGLE_SHEET_ID` + `credentials.json` แล้ว)
-
-```powershell
-python sheets.py
-```
-
-สคริปต์นี้จะเพิ่มแถวตัวอย่างลงในแท็บทดสอบชื่อ `2000-01` ของ Google Sheet ที่ตั้งไว้ — เปิด Google Sheet ขึ้นมาดูว่ามีแท็บ `2000-01` พร้อมแถวตัวอย่างเกิดขึ้นจริง จากนั้น**สามารถลบแท็บ `2000-01` ทิ้งได้** เพราะเป็นข้อมูลทดสอบ
-
-### 4.4 รันบอทจริง
-
-เมื่อทุกขั้นข้างบนผ่านแล้ว รัน:
-
-```powershell
-python bot.py
-```
-
-ถ้าทุกอย่างถูกต้อง บอทจะออนไลน์ในเซิร์ฟเวอร์ Discord ที่เชิญไว้ ลองส่งรูปสลิปเข้าช่องที่ตั้งไว้เพื่อทดสอบใช้งานจริงตาม [วิธีใช้งานบอท](#วิธีใช้งานบอท)
-
-## วิธีใช้งานบอท
-
-1. ส่งรูปสลิป (PNG/JPEG) เข้าช่องที่ตั้งไว้ใน `DISCORD_CHANNEL_ID`
-2. บอทจะขึ้น reaction ⏳ ที่ข้อความระหว่างประมวลผล แล้วเปลี่ยนเป็น ✅ หรือ ❌ เมื่อเสร็จ
-3. บอทจะ reply กลับมาพร้อมยอดเงิน/วันที่/ผู้รับ และให้เลือกหมวดรายจ่ายจากเมนู dropdown หรือกดปุ่ม **"แก้ไข"** เพื่อแก้จำนวนเงิน/ผู้รับ/โน้ตก่อนบันทึก หรือกด **"ยกเลิก"** เพื่อไม่บันทึก
-4. **เฉพาะคนที่ส่งสลิปเท่านั้น** ที่กดปุ่ม/เมนูเหล่านี้ได้ — คนอื่นกดจะได้รับข้อความแจ้งว่าไม่มีสิทธิ์ (เห็นเฉพาะตัวเอง) และเมนู/ปุ่มจะ**หมดอายุใน 24 ชั่วโมง**หากไม่มีการกด
-5. สลิปที่มี **QR code** บอทจะกันการบันทึกซ้ำโดยอัตโนมัติด้วยเลขอ้างอิงธุรกรรมในสลิป — ถ้าส่งสลิปใบเดิมซ้ำ บอทจะแจ้งว่า "สลิปนี้บันทึกไปแล้ว" และไม่เพิ่มแถวใหม่
-   - **สลิปที่ไม่มี QR** (เช่นสลิปจากแอปเป๋าตัง) จะ**ไม่สามารถกันการบันทึกซ้ำได้** เพราะไม่มีเลขอ้างอิงให้เทียบ
-6. ถ้าบอทอ่านยอดเงินจากรูปไม่ได้ (เช่น รูปไม่ชัด หรือ Typhoon ใช้งานไม่ได้ชั่วคราว) บอทจะยังแสดงเมนู/ปุ่มให้เลือกหมวดได้ตามปกติ แต่จะเปิดหน้าต่าง (modal) ให้**พิมพ์ยอดเงินเอง**ก่อนบันทึก
-7. พิมพ์ `!สรุป` ในช่องเดียวกัน เพื่อดูยอดรวมรายจ่ายแยกตามหมวดของ**เดือนปัจจุบัน**
-8. พิมพ์ `!สรุป 2026-10` เพื่อดูยอดรวมของเดือนที่ระบุ (รูปแบบ `YYYY-MM`)
-
-## โครงสร้าง Google Sheet
-
-บอทจะสร้างแท็บ (sheet tab) แยกตามเดือนให้อัตโนมัติ ชื่อแท็บเป็นรูปแบบ `YYYY-MM` โดยอิงจาก**วันที่บนสลิป** (ถ้าอ่านวันที่ไม่ได้ จะใช้วันที่ปัจจุบันแทน)
-
-แต่ละแท็บมีคอลัมน์ตามลำดับนี้:
-
-| วันที่ | เวลา | จำนวนเงิน | ผู้รับ | หมวด | โน้ต | ธนาคาร | เลขอ้างอิง | บันทึกเมื่อ | ลิงก์ Discord |
-|---|---|---|---|---|---|---|---|---|---|
-
-## ความปลอดภัย / ความเป็นส่วนตัว
-
-- **ห้าม commit ไฟล์ `.env` และ `credentials.json` เข้า git เด็ดขาด** เพราะมี token/key และกุญแจเข้าถึง Google Sheet ของคุณ — ไฟล์ `.gitignore` ที่มาพร้อมโปรเจกต์นี้กันสองไฟล์นี้ (รวมถึง `__pycache__/` และ `.venv/`) ไว้ให้แล้ว แต่ควรตรวจสอบด้วยตัวเองก่อน push ทุกครั้ง
-- **รูปสลิปที่ส่งเข้า Discord จะถูกส่งออกไปยัง Typhoon API** (บริษัทภายนอก) เพื่อทำ OCR อ่านข้อความในรูป — หากมีข้อมูลที่ไม่ต้องการให้บุคคลที่สามเห็น ควรพิจารณาก่อนใช้งาน
-- บอทนี้**ไม่ได้ตรวจสอบความถูกต้อง/ความแท้ของสลิปกับธนาคาร** เป็นเพียงเครื่องมือช่วยจดบันทึกรายจ่ายเท่านั้น ไม่ควรใช้เป็นหลักฐานยืนยันการโอนเงินที่เป็นทางการ
-
-## แก้ปัญหาที่พบบ่อย (Troubleshooting)
-
-**บอทไม่ตอบสนองเมื่อส่งรูป**
-- ตรวจว่าเปิด **Message Content Intent** ไว้ในหน้า Bot ของ Developer Portal แล้ว (ดู [2.1](#21-สร้างบอท-discord) ข้อ 3)
-- ตรวจว่าส่งรูปเข้าช่องที่ตรงกับค่า `DISCORD_CHANNEL_ID` ใน `.env` จริง
-- ตรวจว่าบอทมีสิทธิ์ View Channels / Send Messages / Read Message History / Add Reactions / Embed Links ในช่องนั้น
-
-**ขึ้น error 403 หรือ `PermissionError` ตอนเชื่อม Google Sheets**
-- ตรวจว่าได้แชร์ Google Sheet ให้อีเมลของ service account (ค่า `client_email` ใน `credentials.json`) เป็น **Editor** แล้ว (ดู [2.2](#22-เตรียม-google-sheets-service-account) ข้อ 7)
-- ตรวจว่าเปิดใช้งาน (Enable) **Google Sheets API** และ **Google Drive API** ในโปรเจกต์ Google Cloud แล้ว
-
-**ขึ้น error 429 จาก Typhoon**
-- เกิดจากส่งคำขอถี่เกิน rate limit ฟรี (2 req/วินาที, 20 req/นาที) ให้รอสักพักแล้วลองใหม่ หรือหลีกเลี่ยงการส่งสลิปหลายใบพร้อมกัน
-
-**อ่าน QR ไม่ได้ / ไม่กันการบันทึกซ้ำ**
-- สลิปบางประเภท (เช่นจากแอปเป๋าตัง) ไม่มี QR มาด้วย จึงไม่สามารถกันซ้ำได้ — เป็นเรื่องปกติ ไม่ใช่บั๊ก
-- ถ้าสลิปมี QR แต่ยังอ่านไม่ได้ ลองส่งรูปที่คมชัดขึ้น/ความละเอียดสูงขึ้น
-
-**วันที่ในชีตผิด (คลาดเคลื่อนปี)**
-- สลิปธนาคารไทยมักพิมพ์ปีเป็น **พ.ศ.** (เช่น `69` หมายถึง พ.ศ. 2569 = ค.ศ. 2026) หากวันที่ในชีตคลาดเคลื่อนไปประมาณ 543 ปี ให้ตรวจสอบว่าโมเดล LLM แปลงปีถูกต้อง หรือแก้ไขวันที่ด้วยตนเองผ่านปุ่ม "แก้ไข" ก่อนบันทึก
+- browser ได้แค่ Supabase URL + publishable key; **service-role key อยู่ฝั่ง server เท่านั้น**
+- ตาราง `expenses` เปิด RLS โดยไม่มี policy ให้ browser — อ่านเขียนได้ผ่าน API ของเว็บเท่านั้น
+- บอทบันทึกด้วย Discord ID ของคนส่ง เมื่อคนนั้น login เว็บด้วย Discord ระบบจะผูกรายการเหล่านั้นเข้าบัญชีให้ (`claim_discord_expenses` ใน [supabase/schema.sql](supabase/schema.sql))
 
 ## โครงสร้างโปรเจกต์
 
 ```
 money_captuer/
-├── bot.py              # จุดเริ่มโปรแกรม: Discord events + UI (View/Select/Modal)
-├── slip_qr.py          # อ่าน QR + แปลง EMVCo TLV
-├── slip_reader.py      # Typhoon OCR + Typhoon LLM + regex สำรอง
-├── sheets.py           # gspread: หา/สร้างแท็บเดือน, เพิ่มแถว, เช็กซ้ำ, สรุปยอด
+├── web/
+│   ├── app.py           # FastAPI: หน้าเว็บ + /api/* (อัปโหลด/บันทึก/ลบ/สรุป)
+│   ├── auth.py          # ตรวจ access token กับ Supabase Auth
+│   ├── slips.py         # อ่านสลิปที่อัปโหลด (ใช้ slip_qr + slip_reader)
+│   └── static/          # index / dashboard / settings + JS + CSS
+├── store.py             # อ่าน/เขียนตาราง expenses ผ่าน PostgREST (ใช้ทั้งเว็บและบอท)
+├── bot.py               # บอท Discord
+├── slip_qr.py           # อ่าน QR + แปลง EMVCo TLV
+├── slip_reader.py       # Typhoon OCR + Typhoon LLM + regex สำรอง
+├── slip_common.py       # helper กลาง (วันที่ เวลา ยอดเงิน เขตเวลาไทย)
 ├── config.py            # โหลดค่าตั้งค่าจาก .env
-├── tests/               # unit tests
-├── requirements.txt     # รายการไลบรารีที่ต้องติดตั้ง
-├── .env.example         # ตัวอย่างไฟล์ตั้งค่า (คัดลอกเป็น .env)
-├── .gitignore           # กันไฟล์ลับไม่ให้ถูก commit
-└── README.md            # คู่มือนี้
+├── supabase/schema.sql  # ตาราง + index + RLS + ฟังก์ชันผูกรายการ
+├── render.yaml          # ตั้งค่า deploy บน Render
+└── tests/               # unit tests
 ```
+
+---
+
+## รันในเครื่อง
+
+### 1) ติดตั้ง
+
+ต้องมี **Python 3.11+** (แนะนำ 3.12) เปิด PowerShell ในโฟลเดอร์โปรเจกต์:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1      # ถ้าติด "running scripts is disabled" ให้รัน Set-ExecutionPolicy -Scope CurrentUser RemoteSigned ก่อน
+pip install -r requirements.txt
+```
+
+ถ้าไม่ activate venv ให้ใช้ `.\.venv\Scripts\python.exe` แทน `python` ในทุกคำสั่ง
+
+### 2) เตรียมบัญชี
+
+**Supabase (ฐานข้อมูล + login)**
+1. สร้างโปรเจกต์ที่ https://supabase.com
+2. **SQL Editor → New query** → วางเนื้อหาไฟล์ [supabase/schema.sql](supabase/schema.sql) → **Run**
+3. **Project Settings → API Keys** → คัดลอก Project URL, Publishable key และ Secret key
+4. **Authentication → Sign In / Providers → Discord** → เปิด แล้วใส่ Client ID / Client Secret ของแอป Discord
+   (Discord Developer Portal → แอป → OAuth2) และนำ **Callback URL** ที่ Supabase แสดงไปใส่ใน **Redirects** ของแอป Discord
+5. **Authentication → URL Configuration** → Site URL = URL ของเว็บ, Redirect URLs เพิ่ม `https://<เว็บ>/**` และ `http://127.0.0.1:8000/**`
+
+**Typhoon (อ่านสลิป)** — สมัครที่ https://opentyphoon.ai แล้วสร้าง API key
+แผนฟรีมี rate limit 20 request/นาที
+
+**บอท Discord (ถ้าจะใช้บอท)**
+1. [Discord Developer Portal](https://discord.com/developers/applications) → New Application → เมนู **Bot** → Reset Token (ใช้เป็น `DISCORD_TOKEN`)
+2. หน้า Bot → เปิด **Message Content Intent**
+3. **OAuth2 → URL Generator** → scope `bot` + สิทธิ์ View Channels, Send Messages, Read Message History, Add Reactions, Embed Links → เชิญเข้าเซิร์ฟเวอร์
+4. เปิด Developer Mode ใน Discord → คลิกขวาที่ช่อง → Copy Channel ID (ใช้เป็น `DISCORD_CHANNEL_ID`)
+
+### 3) ตั้งค่า `.env`
+
+```powershell
+Copy-Item .env.example .env
+```
+
+| ตัวแปร | ใช้กับ | คำอธิบาย |
+|---|---|---|
+| `SUPABASE_URL` | เว็บ + บอท | Project URL ของ Supabase |
+| `SUPABASE_ANON_KEY` | เว็บ | Publishable key (`sb_publishable_...`) — ส่งให้ browser ได้ |
+| `SUPABASE_SERVICE_ROLE_KEY` | เว็บ + บอท | Secret key (`sb_secret_...`) — **ห้ามแชร์ ห้าม commit** |
+| `PUBLIC_BASE_URL` | บอท | URL ของเว็บ (บอทแนบลิงก์ไป dashboard หลังบันทึก) ไม่ใส่ก็ได้ |
+| `TYPHOON_API_KEY` | เว็บ + บอท | API key จาก opentyphoon.ai |
+| `TYPHOON_LLM_MODEL` | เว็บ + บอท | ค่าเริ่มต้น `typhoon-v2.5-30b-a3b-instruct` |
+| `DISCORD_TOKEN` | บอท | token ของบอท — **ห้ามแชร์** |
+| `DISCORD_CHANNEL_ID` | บอท | ช่องที่บอทอ่านสลิป |
+| `CATEGORIES` | เว็บ + บอท | หมวดรายจ่าย คั่นด้วย `,` (ไม่เกิน 25 หมวด) |
+
+### 4) รัน
+
+```powershell
+python -m pytest -q                                                   # unit tests (ไม่ต้องมี .env)
+python store.py                                                       # ทดสอบต่อ Supabase จริง (เพิ่มแถวทดสอบ discord_id=smoke)
+python slip_reader.py path\to\slip.jpg                                # ทดสอบอ่านสลิปด้วย Typhoon
+python -m uvicorn web.app:create_default_app --factory --reload      # เว็บ → http://127.0.0.1:8000
+python bot.py                                                         # บอท Discord
+```
+
+## Deploy บน Render
+
+1. push repo ขึ้น GitHub
+2. Render → **New → Blueprint** → เลือก repo นี้ (ใช้ [render.yaml](render.yaml))
+3. กรอก env vars ที่ขึ้นว่า `sync: false` (ค่าเดียวกับ `.env`, `PUBLIC_BASE_URL` = URL ที่ Render ให้)
+4. เพิ่ม URL ของ Render ใน Supabase → Authentication → URL Configuration (ดูข้อ 2)
+
+## วิธีใช้บอท Discord
+
+1. ส่งรูปสลิปเข้าช่อง `DISCORD_CHANNEL_ID` → บอทขึ้น ⏳ แล้ว reply ยอด/วันที่/ผู้รับ
+2. เลือกหมวดจากเมนู (หรือกด **แก้ไข** / **ยกเลิก**) — กดได้เฉพาะคนที่ส่งสลิป และหมดอายุใน 24 ชั่วโมง
+3. อ่านยอดไม่ได้ → บอทเปิดหน้าต่างให้พิมพ์ยอดเอง
+4. `!สรุป` หรือ `!สรุป 2026-10` → ยอดรวมแยกหมวดของเดือนนั้น (เฉพาะสลิปของคนที่สั่ง)
+
+## ความปลอดภัย / ความเป็นส่วนตัว
+
+- `.env` อยู่ใน `.gitignore` — ตรวจก่อน push ทุกครั้งว่าไม่มีคีย์หลุด
+- **รูปสลิปถูกส่งไป Typhoon API** (บริษัทภายนอก) เพื่อทำ OCR
+- ระบบ**ไม่ได้ตรวจสลิปปลอมกับธนาคาร** เป็นเครื่องมือจดรายจ่ายเท่านั้น
+
+## แก้ปัญหาที่พบบ่อย
+
+**Login แล้วเด้งกลับหน้าแรก / ขึ้น redirect error** — ตรวจ Redirect URLs ใน Supabase (ต้องมี URL ของเว็บตามด้วย `/**`) และ Redirects ในแอป Discord ต้องเป็น Callback URL ของ Supabase
+
+**บอทไม่ตอบเมื่อส่งรูป** — เปิด Message Content Intent แล้วหรือยัง, ส่งเข้าช่องที่ตรงกับ `DISCORD_CHANNEL_ID` หรือไม่, บอทมีสิทธิ์ในช่องนั้นครบหรือไม่
+
+**Error 429 จาก Typhoon** — ส่งถี่เกิน rate limit ฟรี รอสักพักแล้วลองใหม่
+
+**ไม่กันบันทึกซ้ำ** — สลิปบางประเภท (เช่นจากแอปเป๋าตัง) ไม่มี QR จึงไม่มีเลขอ้างอิงให้เทียบ
+
+**วันที่คลาดไป 543 ปี** — สลิปไทยพิมพ์ปี พ.ศ. ระบบแปลงให้แล้ว ถ้ายังผิดให้แก้วันที่ในฟอร์มก่อนบันทึก

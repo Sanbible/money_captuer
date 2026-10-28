@@ -7,6 +7,7 @@ import pytest
 
 import bot
 from slip_reader import SlipData
+from store import NewExpense
 
 
 # ---------- parse_amount_input ----------
@@ -220,7 +221,7 @@ NOW = datetime(2026, 10, 26, 18, 30, 5, tzinfo=timezone(timedelta(hours=7)))
 
 def _state(**overrides) -> bot.SlipState:
     base = dict(
-        author_id=1, slip_url="https://discord.com/channels/1/2/3", amount=1234.5, date="2026-09-30",
+        author_id=42, slip_url="https://discord.com/channels/1/2/3", amount=1234.5, date="2026-09-30",
         time="23:59", receiver="ร้าน A", note="ข้าวเที่ยง", bank_code="006", trans_ref="REF123",
     )
     base.update(overrides)
@@ -237,8 +238,15 @@ def test_build_record_uses_slip_values():
     assert rec.note == "ข้าวเที่ยง"
     assert rec.bank == "กรุงไทย"
     assert rec.trans_ref == "REF123"
-    assert rec.recorded_at == "2026-10-26 18:30:05"
     assert rec.discord_link == "https://discord.com/channels/1/2/3"
+
+
+def test_build_record_is_discord_expense_without_web_owner():
+    rec = bot.build_record(_state(), "อาหาร", NOW)
+    assert isinstance(rec, NewExpense)
+    assert rec.source == "discord"
+    assert rec.discord_id == "42"
+    assert rec.user_id is None
 
 
 def test_build_record_defaults_when_slip_has_no_date_or_qr():
@@ -255,6 +263,25 @@ def test_build_record_defaults_when_slip_has_no_date_or_qr():
 def test_build_record_requires_amount():
     with pytest.raises(ValueError):
         bot.build_record(_state(amount=None), "อาหาร", NOW)
+
+
+# ---------- summarize_by_category ----------
+
+def test_summarize_by_category_sums_and_sorts_descending():
+    rows = [
+        {"category": "อาหาร", "amount": 100},
+        {"category": "เดินทาง", "amount": "300.25"},  # numeric จาก PostgREST อาจมาเป็น string
+        {"category": "อาหาร", "amount": 50.5},
+    ]
+    assert list(bot.summarize_by_category(rows).items()) == [("เดินทาง", 300.25), ("อาหาร", 150.5)]
+
+
+def test_summarize_by_category_blank_category():
+    assert bot.summarize_by_category([{"category": " ", "amount": 10}]) == {"ไม่ระบุหมวด": 10.0}
+
+
+def test_summarize_by_category_empty():
+    assert bot.summarize_by_category([]) == {}
 
 
 # ---------- format_summary ----------
