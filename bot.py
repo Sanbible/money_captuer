@@ -21,11 +21,14 @@ from datetime import date, datetime
 from typing import Any, Callable, Mapping, NoReturn, Sequence, TypeVar
 
 import discord
+from discord import app_commands
 
+import party_bot
 import slip_qr
 import slip_reader
 import store
 from config import BOT_REQUIRED, Config, ConfigError, load_config
+from party_store import PartyStore
 from slip_common import (  # noqa: F401 — re-export ให้ tests/test_bot_helpers.py
     BKK_TZ,
     bkk_now,
@@ -482,19 +485,34 @@ class SlipView(discord.ui.View):
 # =====================================================================
 
 class SlipBot(discord.Client):
-    def __init__(self, cfg: Config, expense_store: store.ExpenseStore) -> None:
+    def __init__(
+        self, cfg: Config, expense_store: store.ExpenseStore, party_store: PartyStore | None = None
+    ) -> None:
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
         self.cfg = cfg
         self.store = expense_store
+        self.tree = app_commands.CommandTree(self)
+        self._party_store = party_store  # None = ปิดระบบปาร์ตี้
+        self._commands_synced = False
         self._db_lock = asyncio.Lock()  # insert ทีละรายการ (unique index ใน DB กันสลิปซ้ำอีกชั้น)
         self._ocr_slot = asyncio.Semaphore(1)  # Typhoon OCR จำกัด 2 req/s, 20 req/min — อ่านทีละใบ
 
     # ---------- events ----------
 
+    async def setup_hook(self) -> None:
+        if self._party_store is not None:
+            party_bot.setup(self, self._party_store)  # /party + ปุ่มแบบ persistent (ใช้ได้หลังรีสตาร์ท)
+
     async def on_ready(self) -> None:
         log.info("ล็อกอินเป็น %s — ฟังช่อง %s", self.user, self.cfg.discord_channel_id)
+        if self._party_store is not None and not self._commands_synced:
+            self._commands_synced = True
+            try:
+                await party_bot.sync_commands(self)
+            except discord.HTTPException as e:
+                log.error("ลงทะเบียนคำสั่ง /party ไม่สำเร็จ: %s", e)
         if self.get_channel(self.cfg.discord_channel_id) is None:
             log.warning(
                 "มองไม่เห็นช่อง DISCORD_CHANNEL_ID=%s — เช็กว่าเชิญบอทเข้าเซิร์ฟเวอร์และให้สิทธิ์ View Channel แล้ว",
@@ -502,7 +520,12 @@ class SlipBot(discord.Client):
             )
 
     async def on_message(self, message: discord.Message) -> None:
-        if message.author.bot or message.channel.id != self.cfg.discord_channel_id:
+        if message.author.bot:
+            return
+        # ข้อความใน thread ปาร์ตี้ไปที่ party_bot เท่านั้น — ไม่เข้า flow รายจ่ายส่วนตัว
+        if self._party_store is not None and await party_bot.handle_message(self, message):
+            return
+        if message.channel.id != self.cfg.discord_channel_id:
             return
 
         try:
@@ -654,8 +677,9 @@ def main() -> None:
         _fail(f"❌ {e}\nคัดลอก .env.example เป็น .env แล้วกรอกค่าให้ครบ (ดู README.md)")
 
     expense_store = store.ExpenseStore(cfg.supabase_url, cfg.supabase_service_role_key)
+    party_store = PartyStore(cfg.supabase_url, cfg.supabase_service_role_key)
 
-    bot = SlipBot(cfg, expense_store)
+    bot = SlipBot(cfg, expense_store, party_store)
     try:
         # log_handler=None: ใช้ root logging ที่ตั้งไว้ข้างบน (discord.py ไม่ต้องติด handler ของตัวเอง)
         bot.run(cfg.discord_token, log_handler=None)
