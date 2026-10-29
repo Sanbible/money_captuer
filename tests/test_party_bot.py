@@ -234,3 +234,29 @@ def test_transfer_view_one_button_per_transfer():
 
 def test_toggle_status_text_covers_all_statuses():
     assert set(party_bot.TOGGLE_STATUS_TEXT) == {"paid", "unpaid", "settled", "forbidden", "locked", "not_found"}
+
+
+# ---------- final review: ชื่อสมาชิกต้องดึงพร้อมกัน (กันเกิน 3 วินาทีของ Discord) ----------
+
+import time  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+
+def test_member_names_fetches_concurrently():
+    class SlowGuild:
+        id = 999
+
+        def get_member(self, _id):
+            return None
+
+        async def fetch_member(self, member_id):
+            await asyncio.sleep(0.2)
+            return SimpleNamespace(display_name=f"name{member_id}")
+
+    party_bot._name_cache.clear()
+    ids = [str(i) for i in range(1, 11)]
+    start = time.perf_counter()
+    names = asyncio.run(party_bot.member_names(SlowGuild(), ids))
+    elapsed = time.perf_counter() - start
+    assert names == {i: f"name{i}" for i in ids}
+    assert elapsed < 1.0, f"ดึงชื่อทีละคนใช้ {elapsed:.2f}s"

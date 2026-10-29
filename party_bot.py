@@ -393,21 +393,22 @@ _name_cache: dict[tuple[int, str], str] = {}
 
 
 async def member_names(guild: discord.Guild | None, ids: list[str]) -> dict[str, str]:
-    """ชื่อที่แสดงในเมนู (เมนู Discord แสดง mention ไม่ได้)"""
-    names: dict[str, str] = {}
-    for member_id in ids:
-        key = (guild.id if guild else 0, member_id)
-        if key not in _name_cache and guild is not None:
-            member = guild.get_member(int(member_id))
-            if member is None:
-                try:
-                    member = await guild.fetch_member(int(member_id))
-                except discord.HTTPException:
-                    member = None
-            if member is not None:
-                _name_cache[key] = member.display_name
-        names[member_id] = _name_cache.get(key, f"ผู้ใช้ {member_id[-4:]}")
-    return names
+    """ชื่อที่แสดงในเมนู (เมนู Discord แสดง mention ไม่ได้) — คนที่ยังไม่อยู่ใน cache ดึงพร้อมกัน
+    เพื่อให้ตอบ interaction ทันภายใน 3 วินาที"""
+    gid = guild.id if guild else 0
+
+    async def load(member_id: str) -> None:
+        member = guild.get_member(int(member_id))  # type: ignore[union-attr]
+        if member is None:
+            try:
+                member = await guild.fetch_member(int(member_id))  # type: ignore[union-attr]
+            except discord.HTTPException:
+                return
+        _name_cache[(gid, member_id)] = member.display_name
+
+    if guild is not None:
+        await asyncio.gather(*(load(m) for m in ids if (gid, m) not in _name_cache))
+    return {m: _name_cache.get((gid, m), f"ผู้ใช้ {m[-4:]}") for m in ids}
 
 
 class _ExpenseItem:
