@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from dataclasses import asdict
 from datetime import date
@@ -14,15 +15,18 @@ from pathlib import Path
 from typing import Annotated, Any, Callable
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, Response, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from config import WEB_REQUIRED, Config, load_config
 from slip_common import MONTH_RE, bkk_now, normalize_slip_date, normalize_slip_time
+from party_store import PartyStore
 from store import ExpenseStore, NewExpense
-from web.auth import AuthError, AuthUser, SupabaseAuth
+from web import parties
+from web.auth import SupabaseAuth
+from web.deps import Me, current_user  # noqa: F401 — current_user ใช้ในเทสต์/เอกสาร
 from web.slips import SlipDraft, read_draft
 
 log = logging.getLogger(__name__)
@@ -49,37 +53,19 @@ class ExpenseIn(BaseModel):
     trans_ref: str | None = Field(None, max_length=100)
 
 
-async def current_user(request: Request, authorization: Annotated[str | None, Header()] = None) -> AuthUser:
-    """ตรวจ Bearer token กับ Supabase Auth แล้วรับรายการจากบอทที่ยังไม่มีเจ้าของ (ถ้าผูก Discord ไว้)"""
-    auth, store = request.app.state.auth, request.app.state.store
-    scheme, _, token = (authorization or "").partition(" ")
-    if scheme.lower() != "bearer" or not token.strip():
-        raise HTTPException(401, "กรุณาเข้าสู่ระบบ")
-    try:
-        user = await asyncio.to_thread(auth.get_user, token.strip())
-    except AuthError:
-        raise HTTPException(401, "กรุณาเข้าสู่ระบบ") from None
-    if user.discord_id:
-        try:  # ล้มก็ใช้งานต่อได้ — ลองใหม่ใน request ถัดไป
-            await asyncio.to_thread(store.claim_discord_expenses, user.id, user.discord_id)
-        except Exception as e:  # noqa: BLE001
-            log.warning("รับรายการจากบอทไม่สำเร็จ user=%s: %s", user.id, e)
-    return user
-
-
-# ระดับ module เพราะ `from __future__ import annotations` ทำให้ FastAPI หา type จาก globals
-Me = Annotated[AuthUser, Depends(current_user)]
-
-
-def create_app(cfg: Config, *, store: Any, auth: Any, reader: Reader = read_draft) -> FastAPI:
-    """store / auth / reader ส่งเข้ามาเพื่อให้เทสต์ใช้ fake ได้"""
+def create_app(
+    cfg: Config, *, store: Any, auth: Any, reader: Reader = read_draft, party_store: Any | None = None
+) -> FastAPI:
+    """store / auth / reader / party_store ส่งเข้ามาเพื่อให้เทสต์ใช้ fake ได้"""
     app = FastAPI(title="Money Capture", docs_url=None, redoc_url=None)
-    app.state.store, app.state.auth = store, auth
+    app.state.store, app.state.auth, app.state.party_store = store, auth, party_store
+    app.include_router(parties.router)
     ocr_slot = asyncio.Semaphore(1)  # Typhoon OCR จำกัด 20 req/min — อ่านทีละใบเหมือนบอท
 
     # ---------- pages ----------
 
-    for path, page in (("/", "index.html"), ("/dashboard", "dashboard.html"), ("/settings", "settings.html")):
+    for path, page in (("/", "index.html"), ("/dashboard", "dashboard.html"), ("/settings", "settings.html"),
+                       ("/parties", "parties.html"), ("/party/{party_id}", "party.html"), ("/join/{code}", "join.html")):
         app.add_api_route(path, _page(page), methods=["GET"], include_in_schema=False)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -109,7 +95,7 @@ def create_app(cfg: Config, *, store: Any, auth: Any, reader: Reader = read_draf
             duplicate = await asyncio.to_thread(
                 store.is_duplicate, draft.trans_ref, user_id=me.id, discord_id=me.discord_id
             )
-        return {**asdict(draft), "duplicate": duplicate}
+        return {**asdict(draft), "duplicate": duplicate, "image_sha256": hashlib.sha256(data).hexdigest()}
 
     # ---------- expenses ----------
 
@@ -166,7 +152,8 @@ def create_default_app() -> FastAPI:
     cfg = load_config(required=WEB_REQUIRED)
     store = ExpenseStore(cfg.supabase_url, cfg.supabase_service_role_key)
     auth = SupabaseAuth(cfg.supabase_url, cfg.supabase_anon_key)
-    return create_app(cfg, store=store, auth=auth)
+    party_store = PartyStore(cfg.supabase_url, cfg.supabase_service_role_key)
+    return create_app(cfg, store=store, auth=auth, party_store=party_store)
 
 
 # ---------------------------------------------------------------------- helpers
@@ -194,8 +181,9 @@ def summarize(rows: list[dict], month_start: date, first_month: date) -> dict:
     }
 
 
-def _page(filename: str) -> Callable[[], FileResponse]:
+def _page(filename: str) -> Callable[..., Any]:
     async def page() -> FileResponse:
+        # path parameter (party_id / code) อ่านฝั่ง JS จาก URL — server ส่งหน้าเดียวกันเสมอ
         return FileResponse(STATIC_DIR / filename, media_type="text/html")
 
     return page

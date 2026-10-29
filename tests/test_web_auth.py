@@ -4,7 +4,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from web.auth import AuthError, AuthUser, SupabaseAuth, discord_id_from_identities
+from web.auth import AuthError, AuthUser, SupabaseAuth, discord_id_from_identities, display_name
 
 URL = "https://proj.supabase.co"
 ANON = "sb_publishable_abc"
@@ -32,7 +32,8 @@ def make_auth(handler) -> tuple[SupabaseAuth, list[httpx.Request]]:
 def test_get_user_returns_auth_user():
     auth, seen = make_auth(lambda req: httpx.Response(200, json=USER_JSON))
     user = auth.get_user("tok")
-    assert user == AuthUser(id="user-a", email="a@example.com", discord_id="123", providers=("google", "discord"))
+    assert user == AuthUser(id="user-a", email="a@example.com", discord_id="123", providers=("google", "discord"),
+                            name="a@example.com")
     assert str(seen[0].url) == f"{URL}/auth/v1/user"
     assert seen[0].headers["apikey"] == ANON
     assert seen[0].headers["authorization"] == "Bearer tok"
@@ -73,3 +74,18 @@ def test_empty_token_raises_without_request(token):
 )
 def test_discord_id_from_identities(identities, expected):
     assert discord_id_from_identities(identities) == expected
+
+
+@pytest.mark.parametrize(
+    "data, expected",
+    [
+        ({"email": "a@x.com", "user_metadata": {"custom_claims": {"global_name": "สมชาย"}, "full_name": "somchai"}},
+         "สมชาย"),
+        ({"email": "a@x.com", "user_metadata": {"full_name": "Somchai J"}}, "Somchai J"),
+        ({"email": "a@x.com", "user_metadata": {"name": "somchai#0"}}, "somchai#0"),
+        ({"email": "somchai@x.com", "user_metadata": {}}, "somchai@x.com"),
+        ({"email": None, "user_metadata": None}, "ผู้ใช้"),
+    ],
+)
+def test_display_name(data, expected):
+    assert display_name(data) == expected

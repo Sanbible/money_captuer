@@ -17,6 +17,7 @@ class AuthUser:
     email: str | None
     discord_id: str | None  # None = ยังไม่ได้ผูก Discord
     providers: tuple[str, ...]  # วิธี login ที่ผูกไว้ เช่น ("discord", "google")
+    name: str = ""  # ชื่อที่แสดง (เช่นในปาร์ตี้)
 
 
 class SupabaseAuth:
@@ -40,7 +41,19 @@ class SupabaseAuth:
             email=data.get("email") or None,
             discord_id=discord_id_from_identities(identities),
             providers=tuple(i.get("provider", "") for i in identities),
+            name=display_name(data),
         )
+
+
+def display_name(data: dict[str, Any]) -> str:
+    """ชื่อที่แสดง: ชื่อ Discord (global name) → ชื่อเต็ม → ชื่อผู้ใช้ → อีเมล"""
+    meta = data.get("user_metadata") or {}
+    claims = meta.get("custom_claims") or {}
+    for value in (claims.get("global_name"), meta.get("full_name"), meta.get("name"), meta.get("user_name"),
+                  data.get("email")):
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:100]
+    return "ผู้ใช้"
 
 
 def discord_id_from_identities(identities: list[dict[str, Any]] | None) -> str | None:
