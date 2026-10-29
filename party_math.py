@@ -1,7 +1,7 @@
 """คำนวณเงินของปาร์ตี้: หารรายการ, ยอดสุทธิ, รายการโอนที่น้อยครั้งที่สุด — pure functions ไม่ต่อ Discord / network
 
 เงินเป็นจำนวนเต็มหน่วยสตางค์ทุกที่ (ห้าม float) แปลงเป็นบาทเฉพาะตอนแสดงผล
-id ผู้ใช้เป็นสตริงตัวเลขแบบ Discord — ลำดับที่แน่นอนใช้ int(id)
+id ผู้ใช้เป็นสตริง (uuid ของบัญชีเว็บ) — ลำดับที่แน่นอนใช้การเรียงสตริง
 """
 from __future__ import annotations
 
@@ -34,12 +34,12 @@ class Transfer:
     amount: int
 
 
-def _order(member_id: str) -> int:
-    return int(member_id)
+def _order(member_id: str) -> str:
+    return member_id
 
 
 def split(amount: int, participants: Sequence[str]) -> dict[str, int]:
-    """หาร amount ให้ผู้มีส่วน: คนละ amount // n แล้วแจกเศษทีละ 1 สตางค์ตามลำดับ int(id) — ผลรวม == amount เสมอ"""
+    """หาร amount ให้ผู้มีส่วน: คนละ amount // n แล้วแจกเศษทีละ 1 สตางค์ตามลำดับ id — ผลรวม == amount เสมอ"""
     if amount <= 0:
         raise ValueError("ยอดต้องมากกว่า 0")
     if not participants or len(set(participants)) != len(participants):

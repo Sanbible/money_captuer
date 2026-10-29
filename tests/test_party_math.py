@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import random
+import uuid
 
 import pytest
 
@@ -27,9 +28,11 @@ def test_split_uneven():
     assert split(10000, [C, A, B]) == {A: 3334, B: 3333, C: 3333}
 
 
-def test_split_remainder_follows_numeric_id_order():
-    # "10" > "9" ทางตัวเลข แม้ว่าเรียงแบบสตริงจะกลับกัน
-    assert split(101, ["10", "9"]) == {"9": 51, "10": 50}
+def test_split_remainder_follows_sorted_id_order():
+    # id เป็น uuid ของบัญชีเว็บ — เศษสตางค์ไปที่ id ที่เรียงก่อน (สตริง)
+    a = "0b8f0c1e-0000-4000-8000-000000000000"
+    b = "f1d2e3a4-0000-4000-8000-000000000000"
+    assert split(101, [b, a]) == {a: 51, b: 50}
 
 
 def test_payer_not_participant():
@@ -76,7 +79,7 @@ def test_random_invariants():
     rng = random.Random(42)
     for _ in range(200):
         n = rng.randint(1, 10)
-        members = [str(rng.randint(10**17, 10**18)) for _ in range(n)]
+        members = [str(uuid.UUID(int=rng.getrandbits(128), version=4)) for _ in range(n)]
         members = list(dict.fromkeys(members))
         exps = []
         for _ in range(rng.randint(0, 30)):
