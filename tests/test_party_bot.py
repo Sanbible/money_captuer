@@ -127,3 +127,65 @@ def test_expense_summary_embed_lists_shares():
     text = f"{embed.title} {embed.description} " + " ".join(f"{f.name} {f.value}" for f in embed.fields)
     assert "100.00" in text and "หมูกระทะ" in text and "<@5>" in text
     assert "33.34" in text and "33.33" in text
+
+
+# ---------- Task 5: status / แก้ / ลบ ----------
+
+from party_math import balances  # noqa: E402
+
+
+def row(eid: str, payer: str, amount: int, shares: dict[str, int], created_by: str | None = None, note: str = "",
+        created_at: str = "2026-10-29T10:00:00+00:00") -> dict:
+    return {"id": eid, "party_id": PARTY_ID, "status": "confirmed", "payer_id": payer, "amount_satang": amount,
+            "created_by": created_by or payer, "note": note, "participants": list(shares), "created_at": created_at,
+            "party_expense_shares": [{"discord_id": k, "share_satang": v} for k, v in shares.items()]}
+
+
+SPEC_ROWS = [
+    row("e1", "1", 90000, {"1": 30000, "2": 30000, "3": 30000}, note="ที่พัก"),
+    row("e2", "2", 30000, {"1": 10000, "2": 10000, "3": 10000}, note="ข้าว"),
+]
+
+
+def embed_text(embed) -> str:
+    return f"{embed.title} {embed.description} " + " ".join(f"{f.name} {f.value}" for f in embed.fields)
+
+
+def test_expenses_from_rows_uses_stored_shares():
+    rows = [row("e1", "1", 10000, {"1": 3334, "2": 3333, "3": 3333})]
+    exps = party_bot.expenses_from_rows(rows)
+    assert exps[0].payer == "1" and exps[0].amount == 10000 and set(exps[0].participants) == {"1", "2", "3"}
+    b = balances(["1", "2", "3"], exps)
+    assert {k: v.owed for k, v in b.items()} == {"1": 3334, "2": 3333, "3": 3333}
+
+
+def test_status_embed_totals_and_net():
+    text = embed_text(party_bot.status_embed(PARTY, SPEC_ROWS, ["1", "2", "3"]))
+    assert "1,200.00" in text
+    assert "+500.00" in text and "-100.00" in text and "-400.00" in text
+    assert "ที่พัก" in text and "ข้าว" in text
+
+
+def test_status_embed_empty():
+    text = embed_text(party_bot.status_embed(PARTY, [], ["1"]))
+    assert "ยังไม่มีรายการ" in text
+
+
+def test_status_embed_limits_25_rows():
+    rows = [row(f"e{i}", "1", 100 + i, {"1": 100 + i}, note=f"รายการ{i}") for i in range(30)]
+    embed = party_bot.status_embed(PARTY, rows, ["1"])
+    assert "รายการ29" in embed.description and "รายการ4 " not in embed.description + " "
+    assert len(embed.description) <= 4096
+    assert all(len(f.value) <= 1024 for f in embed.fields)
+
+
+def test_editable_rows_creator_or_host():
+    rows = [row("e1", "1", 100, {"1": 100}, created_by="1"), row("e2", "2", 100, {"2": 100}, created_by="2")]
+    assert [r["id"] for r in party_bot.editable_rows(rows, "1", host_id="9")] == ["e1"]
+    assert [r["id"] for r in party_bot.editable_rows(rows, "9", host_id="9")] == ["e2", "e1"]  # ใหม่สุดก่อน
+    assert party_bot.editable_rows(rows, "5", host_id="9") == []
+
+
+def test_editable_rows_max_25():
+    rows = [row(f"e{i}", "1", 100, {"1": 100}) for i in range(30)]
+    assert len(party_bot.editable_rows(rows, "1", host_id="9")) == 25

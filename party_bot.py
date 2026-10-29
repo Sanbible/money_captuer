@@ -21,7 +21,7 @@ from discord import app_commands
 
 import slip_qr
 import slip_reader
-from party_math import format_satang, parse_baht, split
+from party_math import Expense, balances, format_satang, parse_baht, split
 from party_store import MAX_MEMBERS, PartyStore
 from slip_common import guess_mime, is_image_attachment
 
@@ -64,6 +64,7 @@ SAVE_STATUS_TEXT = {
 }
 ERROR_TEXT = "เกิดข้อผิดพลาด ลองใหม่อีกครั้ง"
 DRAFT_TTL = timedelta(hours=24)
+LIST_LIMIT = 25  # รายการใน status / เมนูแก้ (เมนู Discord มีได้ 25 ตัวเลือก)
 
 
 # =====================================================================
@@ -586,8 +587,8 @@ async def render_form(
 
 
 def edit_mode_items(expense_id: str) -> list[discord.ui.Item[Any]]:
-    """ปุ่มเพิ่มเติมตอนแก้รายการที่ยืนยันแล้ว (เติมใน Task 5)"""
-    return []
+    """ปุ่มเพิ่มเติมตอนแก้รายการที่ยืนยันแล้ว"""
+    return [DeleteButton(expense_id)]
 
 
 async def apply_change(interaction: discord.Interaction, expense_id: str, **changes: Any) -> None:
@@ -721,12 +722,172 @@ async def handle_party_slips(bot: SlipBot, message: discord.Message, party: dict
         await run(store.update_expense_message, draft["id"], str(sent.id))
 
 
+
+# =====================================================================
+# /party status + แก้ / ลบรายการ
+# =====================================================================
+
+def expenses_from_rows(rows: list[dict]) -> list[Expense]:
+    """แถว confirmed จาก DB → party_math.Expense (ผู้มีส่วน = คนที่มี share บันทึกไว้)"""
+    return [Expense(r["payer_id"], int(r["amount_satang"]), tuple(shares_of(r))) for r in rows]
+
+
+def signed(satang: int) -> str:
+    return f"+{format_satang(satang)}" if satang > 0 else format_satang(satang)
+
+
+def balance_lines(rows: list[dict], members: list[str]) -> str:
+    bal = balances(members, expenses_from_rows(rows))
+    return "\n".join(
+        f"{mention(m)} จ่าย {format_satang(b.paid)} · ส่วน {format_satang(b.owed)} · **{signed(b.net)}**"
+        for m, b in sorted(bal.items(), key=lambda kv: (-kv[1].net, int(kv[0])))
+    )
+
+
+def expense_line(r: dict) -> str:
+    note = r.get("note") or ("เงินสด" if r.get("source") == "cash" else "ค่าใช้จ่าย")
+    return f"`{baht(r['amount_satang'])}` {note} — จ่ายโดย {mention(r['payer_id'])} · หาร {len(shares_of(r))} คน"
+
+
+def status_embed(party: dict, rows: list[dict], members: list[str]) -> discord.Embed:
+    total = sum(int(r["amount_satang"]) for r in rows)
+    shown = rows[-LIST_LIMIT:]
+    lines = [expense_line(r) for r in shown]
+    if len(rows) > len(shown):
+        lines.insert(0, f"… และอีก {len(rows) - len(shown)} รายการก่อนหน้า")
+    embed = discord.Embed(
+        title=f"📊 {party['name']}",
+        description="\n".join(lines) if rows else "ยังไม่มีรายการ — ส่งรูปสลิปใน thread นี้ หรือใช้ `/party add`",
+        color=COLOR_OPEN if party.get("status") == "open" else COLOR_CLOSED,
+    )
+    embed.add_field(name="ยอดรวม", value=baht(total))
+    embed.add_field(name="รายการ", value=str(len(rows)))
+    embed.add_field(name="ยอดสุทธิ (บวก = ได้คืน, ลบ = ต้องโอน)", value=balance_lines(rows, members) or "–",
+                    inline=False)
+    return embed
+
+
+def editable_rows(rows: list[dict], viewer_id: str, host_id: str) -> list[dict]:
+    """รายการที่คนนี้แก้ได้ (คนเพิ่มรายการ หรือ host) ใหม่สุดก่อน ไม่เกิน 25"""
+    mine = [r for r in rows if viewer_id == host_id or r["created_by"] == viewer_id]
+    return list(reversed(mine))[:LIST_LIMIT]
+
+
+@party_group.command(name="status", description="ดูรายการทั้งหมดและยอดสุทธิของแต่ละคน")
+@guarded
+async def status_cmd(interaction: discord.Interaction) -> None:
+    party = await party_here(interaction)
+    if party is None:
+        return
+    store = _store(interaction)
+    rows = await run(store.confirmed_expenses, party["id"])
+    members = await run(store.members, party["id"])
+    view = discord.ui.View(timeout=None)
+    if party["status"] == "open":
+        view.add_item(EditMenuButton(party["id"]))
+    await interaction.response.send_message(embed=status_embed(party, rows, members), view=view)
+
+
+class EditMenuButton(discord.ui.DynamicItem[discord.ui.Button], template=rf"party:editmenu:{UUID_RE}"):
+    def __init__(self, target: str) -> None:
+        super().__init__(discord.ui.Button(label="แก้/ลบรายการ", emoji="✏️", style=discord.ButtonStyle.secondary,
+                                           custom_id=f"party:editmenu:{target}"))
+        self.target = target
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: Any) -> EditMenuButton:
+        return cls(match["target"])
+
+    @guarded
+    async def callback(self, interaction: discord.Interaction) -> None:
+        store = _store(interaction)
+        party = await run(store.get_party, self.target)
+        if party is None or party["status"] != "open":
+            await reply(interaction, SAVE_STATUS_TEXT["closed"])
+            return
+        rows = editable_rows(await run(store.confirmed_expenses, party["id"]), str(interaction.user.id),
+                             party["host_id"])
+        if not rows:
+            await reply(interaction, "ไม่มีรายการที่คุณแก้ได้ (แก้ได้เฉพาะรายการที่คุณเพิ่ม หรือถ้าคุณเป็น host)")
+            return
+        names = await member_names(interaction.guild, sorted({r["payer_id"] for r in rows}))
+        options = [
+            discord.SelectOption(label=f"{baht(r['amount_satang'])} — {r.get('note') or 'ค่าใช้จ่าย'}"[:100],
+                                 description=f"จ่ายโดย {names[r['payer_id']]}"[:100], value=r["id"])
+            for r in rows
+        ]
+        view = discord.ui.View(timeout=None)
+        view.add_item(PickExpenseSelect(party["id"], options))
+        await interaction.response.send_message("เลือกรายการที่จะแก้หรือลบ", view=view, ephemeral=True)
+
+
+class PickExpenseSelect(discord.ui.DynamicItem[discord.ui.Select], template=rf"party:pick:{UUID_RE}"):
+    def __init__(self, target: str, options: list[discord.SelectOption] | None = None) -> None:
+        super().__init__(discord.ui.Select(custom_id=f"party:pick:{target}", placeholder="เลือกรายการ",
+                                           options=options or [], min_values=1, max_values=1))
+        self.target = target
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Select, match: Any) -> PickExpenseSelect:
+        return cls(match["target"])
+
+    @guarded
+    async def callback(self, interaction: discord.Interaction) -> None:
+        values = (interaction.data or {}).get("values") or []
+        ctx = await load_form(interaction, values[0])
+        if ctx is None:
+            return
+        embed, view = await render_form(interaction, *ctx)
+        await interaction.response.edit_message(content=None, embed=embed, view=view)
+
+
+class DeleteButton(_ExpenseItem, discord.ui.DynamicItem[discord.ui.Button], template=rf"party:delete:{UUID_RE}"):
+    def __init__(self, target: str) -> None:
+        super().__init__(discord.ui.Button(label="ลบรายการ", emoji="🗑️", style=discord.ButtonStyle.danger,
+                                           custom_id=f"party:delete:{target}", row=2))
+        self.target = target
+
+    @guarded
+    async def callback(self, interaction: discord.Interaction) -> None:
+        ctx = await load_form(interaction, self.target)
+        if ctx is None:
+            return
+        view = discord.ui.View(timeout=None)
+        view.add_item(DeleteConfirmButton(self.target))
+        await interaction.response.edit_message(
+            content=f"ลบรายการ {expense_line(ctx[0])} จริงไหม? ลบแล้วกู้คืนไม่ได้", embed=None, view=view)
+
+
+class DeleteConfirmButton(_ExpenseItem, discord.ui.DynamicItem[discord.ui.Button], template=rf"party:delok:{UUID_RE}"):
+    def __init__(self, target: str) -> None:
+        super().__init__(discord.ui.Button(label="ยืนยันลบ", style=discord.ButtonStyle.danger,
+                                           custom_id=f"party:delok:{target}"))
+        self.target = target
+
+    @guarded
+    async def callback(self, interaction: discord.Interaction) -> None:
+        ctx = await load_form(interaction, self.target)
+        if ctx is None:
+            return
+        expense, party, _ = ctx
+        status = await run(_store(interaction).delete_expense, expense["id"], str(interaction.user.id))
+        if status != "ok":
+            await reply(interaction, SAVE_STATUS_TEXT.get(status, ERROR_TEXT))
+            return
+        await interaction.response.edit_message(content="🗑️ ลบรายการแล้ว", embed=None, view=None)
+        await delete_thread_message(interaction.client, party, expense.get("summary_message_id"))
+        thread = await get_thread(interaction.client, party["thread_id"])
+        if thread is not None:
+            await thread.send(f"🗑️ {mention(str(interaction.user.id))} ลบรายการ {expense_line(expense)}")
+
+
 # =====================================================================
 # ลงทะเบียนกับบอท
 # =====================================================================
 
 DYNAMIC_ITEMS: list[type[discord.ui.DynamicItem[Any]]] = [
     JoinButton, OpenDraftButton, PayerSelect, SharesSelect, AmountButton, ConfirmButton, CancelButton,
+    EditMenuButton, PickExpenseSelect, DeleteButton, DeleteConfirmButton,
 ]
 
 
