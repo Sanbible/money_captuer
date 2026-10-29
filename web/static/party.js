@@ -8,7 +8,11 @@
 
   try {
     await MC.requireSessionOrLogin();
-  } catch {
+  } catch (e) {
+    if (!e.redirecting) { // ไม่ใช่การพาไปหน้า login → แสดงให้เห็น อย่าปล่อยหน้าว่าง
+      $("page-error").textContent = `เปิดหน้านี้ไม่สำเร็จ (${e.message}) — กด Ctrl+F5 เพื่อโหลดใหม่`;
+      $("page-error").classList.remove("hidden");
+    }
     return;
   }
 

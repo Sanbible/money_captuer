@@ -39,7 +39,7 @@ const MC = (() => {
     const s = await session();
     if (!s) {
       location.replace("/");
-      throw new Error("ยังไม่ได้เข้าสู่ระบบ");
+      throw Object.assign(new Error("ยังไม่ได้เข้าสู่ระบบ"), { redirecting: true });
     }
     return s;
   }
@@ -113,7 +113,7 @@ const MC = (() => {
     const s = await session();
     if (!s) {
       location.replace(`/?next=${encodeURIComponent(location.pathname)}`);
-      throw new Error("ยังไม่ได้เข้าสู่ระบบ");
+      throw Object.assign(new Error("ยังไม่ได้เข้าสู่ระบบ"), { redirecting: true });
     }
     return s;
   }

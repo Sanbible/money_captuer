@@ -60,6 +60,15 @@ def create_app(
     app = FastAPI(title="Money Capture", docs_url=None, redoc_url=None)
     app.state.store, app.state.auth, app.state.party_store = store, auth, party_store
     app.include_router(parties.router)
+
+    @app.middleware("http")
+    async def revalidate_pages(request, call_next):  # type: ignore[no-untyped-def]
+        """หน้าเว็บ/JS/CSS ให้ browser ถาม server ทุกครั้ง (ได้ 304 ถ้าไม่เปลี่ยน) — กันใช้ app.js เวอร์ชันเก่า
+        จาก cache หลังอัปเดตเว็บ ซึ่งทำให้หน้าใหม่พังเงียบ ๆ"""
+        response = await call_next(request)
+        if not request.url.path.startswith("/api/"):
+            response.headers.setdefault("Cache-Control", "no-cache")
+        return response
     ocr_slot = asyncio.Semaphore(1)  # Typhoon OCR จำกัด 20 req/min — อ่านทีละใบเหมือนบอท
 
     # ---------- pages ----------

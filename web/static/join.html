@@ -26,7 +26,12 @@
       const code = decodeURIComponent(location.pathname.split("/").pop() || "");
       try {
         await MC.requireSessionOrLogin(); // ยังไม่ login → ไปหน้าแรกแล้วกลับมาที่ลิงก์นี้
-      } catch {
+      } catch (e) {
+        if (!e.redirecting) {
+          $("spinner").classList.add("hidden");
+          $("message").className = "notice notice-error";
+          $("message").textContent = `เปิดหน้านี้ไม่สำเร็จ (${e.message}) — กด Ctrl+F5 เพื่อโหลดใหม่`;
+        }
         return;
       }
       try {

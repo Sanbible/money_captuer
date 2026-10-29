@@ -462,3 +462,12 @@ def test_slips_read_returns_image_sha256(client):
 def test_party_pages_served(client, path):
     resp = client.get(path)
     assert resp.status_code == 200 and resp.headers["content-type"].startswith("text/html")
+
+
+# ---------- หน้าเว็บ/JS ต้องไม่ถูก browser ใช้ของเก่าจาก cache (หน้าปาร์ตี้ว่างเพราะ app.js เวอร์ชันเก่า) ----------
+
+@pytest.mark.parametrize("path", ["/static/app.js", "/static/party.js", "/static/style.css", "/party/x", "/dashboard"])
+def test_pages_and_static_must_revalidate(client, path):
+    resp = client.get(path)
+    assert resp.status_code == 200
+    assert resp.headers.get("cache-control") == "no-cache"
