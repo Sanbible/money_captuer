@@ -189,3 +189,48 @@ def test_editable_rows_creator_or_host():
 def test_editable_rows_max_25():
     rows = [row(f"e{i}", "1", 100, {"1": 100}) for i in range(30)]
     assert len(party_bot.editable_rows(rows, "1", host_id="9")) == 25
+
+
+# ---------- Task 6: ปิดปาร์ตี้ / สรุป / โอนแล้ว ----------
+
+import asyncio  # noqa: E402
+
+TRANSFERS = [
+    {"id": "33333333-3333-3333-3333-333333333331", "seq": 1, "from_id": "3", "to_id": "1", "amount_satang": 40000,
+     "paid": False},
+    {"id": "33333333-3333-3333-3333-333333333332", "seq": 2, "from_id": "2", "to_id": "1", "amount_satang": 10000,
+     "paid": False},
+]
+CLOSED = {**PARTY, "status": "closed"}
+
+
+def test_final_summary_spec_example():
+    text = embed_text(party_bot.final_summary_embed(CLOSED, SPEC_ROWS, ["1", "2", "3"], TRANSFERS))
+    assert "1,200.00" in text
+    assert "<@3> → <@1> : 400.00 บาท" in text and "<@2> → <@1> : 100.00 บาท" in text
+    assert "+500.00" in text and "-400.00" in text
+
+
+def test_final_summary_no_transfers():
+    text = embed_text(party_bot.final_summary_embed({**PARTY, "status": "settled"}, [], ["1", "2"], []))
+    assert "ไม่มีใครต้องโอน" in text
+
+
+def test_final_summary_marks_paid_and_settled():
+    paid = [{**t, "paid": True} for t in TRANSFERS]
+    embed = party_bot.final_summary_embed({**PARTY, "status": "settled"}, SPEC_ROWS, ["1", "2", "3"], paid)
+    assert "เคลียร์ครบแล้ว" in embed.title
+    assert embed_text(embed).count("✅") >= 2
+
+
+def test_transfer_view_one_button_per_transfer():
+    async def build():
+        return party_bot.transfer_view(TRANSFERS)
+
+    view = asyncio.run(build())
+    ids = [item.custom_id for item in view.children]
+    assert ids == [f"party:paid:{t['id']}" for t in TRANSFERS]
+
+
+def test_toggle_status_text_covers_all_statuses():
+    assert set(party_bot.TOGGLE_STATUS_TEXT) == {"paid", "unpaid", "settled", "forbidden", "locked", "not_found"}

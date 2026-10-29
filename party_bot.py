@@ -21,7 +21,7 @@ from discord import app_commands
 
 import slip_qr
 import slip_reader
-from party_math import Expense, balances, format_satang, parse_baht, split
+from party_math import Expense, balances, format_satang, parse_baht, settle, split
 from party_store import MAX_MEMBERS, PartyStore
 from slip_common import guess_mime, is_image_attachment
 
@@ -61,6 +61,14 @@ SAVE_STATUS_TEXT = {
     "invalid": "ข้อมูลไม่ถูกต้อง (คนจ่าย/ผู้มีส่วนต้องเป็นสมาชิก และต้องมียอด) ลองเปิดฟอร์มใหม่",
     "duplicate": "สลิปนี้ถูกบันทึกในปาร์ตี้แล้ว",
     "not_found": "ไม่พบรายการนี้ (อาจถูกยกเลิกหรือลบไปแล้ว)",
+}
+TOGGLE_STATUS_TEXT = {
+    "paid": "บันทึกว่าโอนแล้ว",
+    "unpaid": "ยกเลิกสถานะโอนแล้ว",
+    "settled": "ทุกคนโอนครบแล้ว",
+    "forbidden": "เฉพาะคนโอนหรือคนรับของรายการนี้เท่านั้นที่กดได้",
+    "locked": "ปาร์ตี้นี้เคลียร์ครบแล้ว แก้สถานะไม่ได้",
+    "not_found": "ไม่พบรายการโอนนี้",
 }
 ERROR_TEXT = "เกิดข้อผิดพลาด ลองใหม่อีกครั้ง"
 DRAFT_TTL = timedelta(hours=24)
@@ -881,13 +889,159 @@ class DeleteConfirmButton(_ExpenseItem, discord.ui.DynamicItem[discord.ui.Button
             await thread.send(f"🗑️ {mention(str(interaction.user.id))} ลบรายการ {expense_line(expense)}")
 
 
+
+# =====================================================================
+# /party end + สรุปการโอน + ปุ่ม [โอนแล้ว]
+# =====================================================================
+
+def transfer_line(i: int, t: dict) -> str:
+    mark = "✅" if t.get("paid") else "⏳"
+    return f"{i}. {mention(t['from_id'])} → {mention(t['to_id'])} : {format_satang(int(t['amount_satang']))} บาท {mark}"
+
+
+def final_summary_embed(party: dict, rows: list[dict], members: list[str], transfers: list[dict]) -> discord.Embed:
+    settled = party.get("status") == "settled"
+    total = sum(int(r["amount_satang"]) for r in rows)
+    embed = discord.Embed(
+        title=(f"✅ เคลียร์ครบแล้ว — {party['name']}" if settled else f"🧾 สรุปปาร์ตี้ {party['name']}"),
+        description=f"ยอดรวมทั้งปาร์ตี้ **{baht(total)}** จาก {len(rows)} รายการ",
+        color=COLOR_DONE if settled else COLOR_OPEN,
+    )
+    embed.add_field(name="แต่ละคน (จ่ายไป · ส่วนที่ต้องรับผิดชอบ · สุทธิ)", value=balance_lines(rows, members) or "–",
+                    inline=False)
+    embed.add_field(
+        name="รายการโอน",
+        value="\n".join(transfer_line(i, t) for i, t in enumerate(transfers, 1)) or "ไม่มีใครต้องโอน 🎉",
+        inline=False,
+    )
+    if transfers and not settled:
+        embed.set_footer(text="คนโอนหรือคนรับกดปุ่มตามหมายเลขเมื่อโอนแล้ว (กดซ้ำเพื่อยกเลิก)")
+    return embed
+
+
+class PaidButton(discord.ui.DynamicItem[discord.ui.Button], template=rf"party:paid:{UUID_RE}"):
+    def __init__(self, target: str, *, label: str = "โอนแล้ว", paid: bool = False) -> None:
+        super().__init__(discord.ui.Button(
+            label=label, emoji="✅" if paid else "💸",
+            style=discord.ButtonStyle.success if paid else discord.ButtonStyle.secondary,
+            custom_id=f"party:paid:{target}",
+        ))
+        self.target = target
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: Any) -> PaidButton:
+        return cls(match["target"])
+
+    @guarded
+    async def callback(self, interaction: discord.Interaction) -> None:
+        store = _store(interaction)
+        status = await run(store.toggle_paid, self.target, str(interaction.user.id))
+        if status not in ("paid", "unpaid", "settled"):
+            await reply(interaction, TOGGLE_STATUS_TEXT.get(status, ERROR_TEXT))
+            return
+        party = await run(store.party_by_thread, str(interaction.channel_id))
+        if party is None:
+            await reply(interaction, TOGGLE_STATUS_TEXT[status])
+            return
+        embed, view = await summary_message(store, party)
+        await interaction.response.edit_message(embed=embed, view=view)
+        if status == "settled":
+            await interaction.followup.send(f"🎉 ทุกคนโอนครบแล้ว — ปาร์ตี้ **{party['name']}** เคลียร์เรียบร้อย")
+
+
+def transfer_view(transfers: list[dict]) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    for i, t in enumerate(transfers, 1):
+        view.add_item(PaidButton(t["id"], label=f"{i}. {'โอนแล้ว' if t.get('paid') else 'กดเมื่อโอนแล้ว'}",
+                                 paid=bool(t.get("paid"))))
+    return view
+
+
+async def summary_message(store: PartyStore, party: dict) -> tuple[discord.Embed, discord.ui.View | None]:
+    """ข้อความสรุปตอนปิด (อ่านข้อมูลล่าสุดจาก DB)"""
+    party = await run(store.get_party, party["id"]) or party
+    rows = await run(store.confirmed_expenses, party["id"])
+    members = await run(store.members, party["id"])
+    transfers = await run(store.transfers, party["id"])
+    view = transfer_view(transfers) if transfers and party["status"] == "closed" else None
+    return final_summary_embed(party, rows, members, transfers), view
+
+
+async def finalize(bot: discord.Client, party: dict) -> None:
+    """หลังล็อกปาร์ตี้: คำนวณรายการโอน → บันทึก (ครั้งเดียว) → โพสต์สรุป"""
+    store: PartyStore = bot.party_store  # type: ignore[attr-defined]
+    rows = await run(store.confirmed_expenses, party["id"])
+    members = await run(store.members, party["id"])
+    net = {m: b.net for m, b in balances(members, expenses_from_rows(rows)).items()}
+    await run(store.create_transfers, party["id"], settle(net))
+    embed, view = await summary_message(store, party)
+    thread = await get_thread(bot, party["thread_id"])
+    if thread is None:
+        raise RuntimeError("หา thread ของปาร์ตี้ไม่เจอ")
+    message = await thread.send(embed=embed, view=view) if view else await thread.send(embed=embed)
+    await run(store.update_party, party["id"], summary_message_id=str(message.id))
+    fresh = await run(store.get_party, party["id"]) or party
+    await refresh_invite(bot, fresh)
+    if fresh["status"] == "settled":
+        await thread.send("✅ ไม่มีใครต้องโอน — ปาร์ตี้นี้เคลียร์ครบแล้ว")
+
+
+@party_group.command(name="end", description="(host) ปิดปาร์ตี้และสรุปว่าใครต้องโอนให้ใคร")
+@guarded
+async def end_cmd(interaction: discord.Interaction) -> None:
+    party = await party_here(interaction)
+    if party is None:
+        return
+    if str(interaction.user.id) != party["host_id"]:
+        await reply(interaction, "เฉพาะ host เท่านั้นที่ปิดปาร์ตี้ได้")
+        return
+    if party["status"] != "open" and party.get("summary_message_id"):
+        await reply(interaction, "ปาร์ตี้นี้ปิดไปแล้ว ดูสรุปได้ใน thread นี้")
+        return
+    view = discord.ui.View(timeout=None)
+    view.add_item(EndConfirmButton(party["id"]))
+    await reply(interaction, "ปิดปาร์ตี้แล้วจะ**เพิ่ม/แก้รายการไม่ได้อีก** และบอทจะสรุปว่าใครต้องโอนให้ใคร — ยืนยันไหม?",
+                view=view)
+
+
+class EndConfirmButton(discord.ui.DynamicItem[discord.ui.Button], template=rf"party:end:{UUID_RE}"):
+    def __init__(self, target: str) -> None:
+        super().__init__(discord.ui.Button(label="ยืนยันปิดปาร์ตี้", emoji="🔒", style=discord.ButtonStyle.danger,
+                                           custom_id=f"party:end:{target}"))
+        self.target = target
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: Any) -> EndConfirmButton:
+        return cls(match["target"])
+
+    @guarded
+    async def callback(self, interaction: discord.Interaction) -> None:
+        store = _store(interaction)
+        party = await run(store.get_party, self.target)
+        if party is None:
+            await reply(interaction, JOIN_STATUS_TEXT["not_found"])
+            return
+        status = await run(store.close, party["id"], str(interaction.user.id))
+        if status == "forbidden":
+            await reply(interaction, "เฉพาะ host เท่านั้นที่ปิดปาร์ตี้ได้")
+            return
+        if status == "already_closed" and party.get("summary_message_id"):
+            await reply(interaction, "ปาร์ตี้นี้ปิดไปแล้ว")
+            return
+        if status not in ("ok", "already_closed"):
+            await reply(interaction, ERROR_TEXT)
+            return
+        await interaction.response.edit_message(content="🔒 ปิดปาร์ตี้แล้ว กำลังสรุป…", view=None)
+        await finalize(interaction.client, party)
+
+
 # =====================================================================
 # ลงทะเบียนกับบอท
 # =====================================================================
 
 DYNAMIC_ITEMS: list[type[discord.ui.DynamicItem[Any]]] = [
     JoinButton, OpenDraftButton, PayerSelect, SharesSelect, AmountButton, ConfirmButton, CancelButton,
-    EditMenuButton, PickExpenseSelect, DeleteButton, DeleteConfirmButton,
+    EditMenuButton, PickExpenseSelect, DeleteButton, DeleteConfirmButton, EndConfirmButton, PaidButton,
 ]
 
 
