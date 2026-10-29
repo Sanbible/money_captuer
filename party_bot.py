@@ -8,14 +8,22 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import hashlib
 import logging
+import math
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeVar
 
 import discord
 from discord import app_commands
 
-from party_math import format_satang
+import slip_qr
+import slip_reader
+from party_math import format_satang, parse_baht, split
 from party_store import MAX_MEMBERS, PartyStore
+from slip_common import guess_mime, is_image_attachment
 
 if TYPE_CHECKING:
     from bot import SlipBot
@@ -46,7 +54,16 @@ REMOVE_STATUS_TEXT = {
     "closed": "ปาร์ตี้นี้ปิดแล้ว",
     "not_found": "ไม่พบปาร์ตี้นี้",
 }
+SAVE_STATUS_TEXT = {
+    "ok": "บันทึกแล้ว",
+    "closed": "ปาร์ตี้นี้ปิดแล้ว เพิ่ม/แก้รายการไม่ได้",
+    "forbidden": "แก้ได้เฉพาะคนที่เพิ่มรายการนี้ หรือ host",
+    "invalid": "ข้อมูลไม่ถูกต้อง (คนจ่าย/ผู้มีส่วนต้องเป็นสมาชิก และต้องมียอด) ลองเปิดฟอร์มใหม่",
+    "duplicate": "สลิปนี้ถูกบันทึกในปาร์ตี้แล้ว",
+    "not_found": "ไม่พบรายการนี้ (อาจถูกยกเลิกหรือลบไปแล้ว)",
+}
 ERROR_TEXT = "เกิดข้อผิดพลาด ลองใหม่อีกครั้ง"
+DRAFT_TTL = timedelta(hours=24)
 
 
 # =====================================================================
@@ -279,11 +296,438 @@ async def remove_member(interaction: discord.Interaction, party: dict, member: d
     await refresh_invite(interaction.client, party)
 
 
+
+# =====================================================================
+# รายการค่าใช้จ่าย: draft → ฟอร์มยืนยัน → confirmed
+# =====================================================================
+
+@dataclass
+class FormState:
+    can_confirm: bool
+    warnings: list[str] = field(default_factory=list)
+    shares: dict[str, int] = field(default_factory=dict)
+
+
+def amount_to_satang(value: float | None) -> int | None:
+    """ยอดจาก OCR (บาท, float) -> สตางค์ ; ไม่ใช่จำนวนบวก -> None"""
+    if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+        return None
+    satang = int((Decimal(str(value)) * 100).to_integral_value())
+    return satang if satang > 0 else None
+
+
+def sanitize_draft(draft: dict, members: list[str]) -> dict:
+    """ตัดคนที่ไม่ใช่สมาชิกแล้วออก (เช่นถูกเตะ) ; คนจ่ายหลุด → คนเพิ่มรายการ ; ผู้มีส่วนว่าง → ทุกคน"""
+    out = dict(draft)
+    participants = [m for m in (draft.get("participants") or []) if m in members]
+    out["participants"] = participants or list(members)
+    if out.get("payer_id") not in members:
+        out["payer_id"] = draft["created_by"] if draft["created_by"] in members else members[0]
+    return out
+
+
+def is_expired(row: dict, now: datetime) -> bool:
+    if row.get("status") != "draft":
+        return False
+    created = datetime.fromisoformat(str(row["created_at"]).replace("Z", "+00:00"))
+    return now - created > DRAFT_TTL
+
+
+def form_state(draft: dict, *, duplicate: bool, expired: bool) -> FormState:
+    warnings: list[str] = []
+    amount = draft.get("amount_satang")
+    shares = split(amount, draft["participants"]) if amount else {}
+    if not amount:
+        warnings.append("⚠️ อ่านยอดจากสลิปไม่ได้ — กด **แก้ยอด/หมายเหตุ** เพื่อกรอกยอด")
+    if duplicate:
+        warnings.append("⛔ " + SAVE_STATUS_TEXT["duplicate"])
+    if expired:
+        warnings.append("⌛ รายการนี้หมดอายุแล้ว (เกิน 24 ชั่วโมง) — ส่งสลิปใหม่อีกครั้ง")
+    return FormState(can_confirm=bool(amount) and not duplicate and not expired, warnings=warnings, shares=shares)
+
+
+def share_lines(shares: dict[str, int]) -> str:
+    return "\n".join(f"{mention(m)} {baht(v)}" for m, v in shares.items()) or "–"
+
+
+def expense_summary_embed(expense: dict, shares: dict[str, int]) -> discord.Embed:
+    """สรุปรายการที่ยืนยันแล้ว (โพสต์ใน thread ให้ทุกคนเห็น)"""
+    note = expense.get("note") or ("เงินสด" if expense.get("source") == "cash" else "ค่าใช้จ่าย")
+    embed = discord.Embed(
+        title=f"🧾 {baht(expense['amount_satang'])} — {note}",
+        description=f"จ่ายโดย {mention(expense['payer_id'])} · เพิ่มโดย {mention(expense['created_by'])}",
+        color=COLOR_DONE,
+    )
+    embed.add_field(name=f"หารกัน {len(shares)} คน", value=share_lines(shares), inline=False)
+    if expense.get("slip_message_url"):
+        embed.add_field(name="สลิป", value=f"[ดูสลิป]({expense['slip_message_url']})", inline=False)
+    return embed
+
+
+def form_embed(expense: dict, fs: FormState) -> discord.Embed:
+    editing = expense.get("status") == "confirmed"
+    embed = discord.Embed(
+        title="✏️ แก้ไขรายการ (บันทึกทันทีที่เปลี่ยน)" if editing else "🧾 ตรวจรายการก่อนบันทึก",
+        description="\n".join(fs.warnings) or None,
+        color=COLOR_OPEN if fs.can_confirm or editing else discord.Color.orange(),
+    )
+    embed.add_field(name="ยอด", value=baht(expense.get("amount_satang")))
+    embed.add_field(name="คนจ่าย", value=mention(expense["payer_id"]))
+    embed.add_field(name="หมายเหตุ", value=expense.get("note") or "–")
+    embed.add_field(name=f"ผู้มีส่วน ({len(expense['participants'])} คน)",
+                    value=share_lines(fs.shares) if fs.shares else " ".join(mention(m) for m in expense["participants"]),
+                    inline=False)
+    return embed
+
+
+_name_cache: dict[tuple[int, str], str] = {}
+
+
+async def member_names(guild: discord.Guild | None, ids: list[str]) -> dict[str, str]:
+    """ชื่อที่แสดงในเมนู (เมนู Discord แสดง mention ไม่ได้)"""
+    names: dict[str, str] = {}
+    for member_id in ids:
+        key = (guild.id if guild else 0, member_id)
+        if key not in _name_cache and guild is not None:
+            member = guild.get_member(int(member_id))
+            if member is None:
+                try:
+                    member = await guild.fetch_member(int(member_id))
+                except discord.HTTPException:
+                    member = None
+            if member is not None:
+                _name_cache[key] = member.display_name
+        names[member_id] = _name_cache.get(key, f"ผู้ใช้ {member_id[-4:]}")
+    return names
+
+
+class _ExpenseItem:
+    """ส่วนกลางของปุ่ม/เมนูที่ผูกกับรายการ (target = expense id)"""
+
+    target: str
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Item[Any], match: Any) -> Any:
+        return cls(match["target"])  # type: ignore[call-arg]
+
+
+class OpenDraftButton(_ExpenseItem, discord.ui.DynamicItem[discord.ui.Button], template=rf"party:open:{UUID_RE}"):
+    def __init__(self, target: str) -> None:
+        super().__init__(discord.ui.Button(label="ตรวจ/ยืนยัน", emoji="📝", style=discord.ButtonStyle.primary,
+                                           custom_id=f"party:open:{target}"))
+        self.target = target
+
+    @guarded
+    async def callback(self, interaction: discord.Interaction) -> None:
+        ctx = await load_form(interaction, self.target)
+        if ctx is None:
+            return
+        expense, party, members = ctx
+        if expense["status"] != "draft":
+            await reply(interaction, "รายการนี้ยืนยันไปแล้ว — ใช้ `/party status` เพื่อแก้ไข")
+            return
+        embed, view = await render_form(interaction, expense, party, members)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
+class PayerSelect(_ExpenseItem, discord.ui.DynamicItem[discord.ui.Select], template=rf"party:payer:{UUID_RE}"):
+    def __init__(self, target: str, options: list[discord.SelectOption] | None = None) -> None:
+        super().__init__(discord.ui.Select(custom_id=f"party:payer:{target}", placeholder="คนจ่าย",
+                                           options=options or [], min_values=1, max_values=1, row=0))
+        self.target = target
+
+    @guarded
+    async def callback(self, interaction: discord.Interaction) -> None:
+        values = (interaction.data or {}).get("values") or []
+        await apply_change(interaction, self.target, payer_id=values[0])
+
+
+class SharesSelect(_ExpenseItem, discord.ui.DynamicItem[discord.ui.Select], template=rf"party:shares:{UUID_RE}"):
+    def __init__(self, target: str, options: list[discord.SelectOption] | None = None) -> None:
+        super().__init__(discord.ui.Select(custom_id=f"party:shares:{target}", placeholder="ผู้มีส่วน (เลือกได้หลายคน)",
+                                           options=options or [], min_values=1,
+                                           max_values=max(1, len(options or [])), row=1))
+        self.target = target
+
+    @guarded
+    async def callback(self, interaction: discord.Interaction) -> None:
+        values = list((interaction.data or {}).get("values") or [])
+        await apply_change(interaction, self.target, participants=values)
+
+
+class AmountButton(_ExpenseItem, discord.ui.DynamicItem[discord.ui.Button], template=rf"party:amount:{UUID_RE}"):
+    def __init__(self, target: str) -> None:
+        super().__init__(discord.ui.Button(label="แก้ยอด/หมายเหตุ", emoji="✏️", style=discord.ButtonStyle.secondary,
+                                           custom_id=f"party:amount:{target}", row=2))
+        self.target = target
+
+    @guarded
+    async def callback(self, interaction: discord.Interaction) -> None:
+        ctx = await load_form(interaction, self.target)
+        if ctx is None:
+            return
+        await interaction.response.send_modal(AmountNoteModal(ctx[0]))
+
+
+class AmountNoteModal(discord.ui.Modal):
+    def __init__(self, expense: dict) -> None:
+        super().__init__(title="แก้ยอด / หมายเหตุ", timeout=15 * 60)
+        self.expense_id = expense["id"]
+        amount = expense.get("amount_satang")
+        self.amount = discord.ui.TextInput(label="ยอด (บาท)", placeholder="เช่น 1,234.50", max_length=20,
+                                           default=format_satang(amount).replace(",", "") if amount else None)
+        self.note = discord.ui.TextInput(label="หมายเหตุ (ไม่ใส่ก็ได้)", placeholder="เช่น ค่าหมูกระทะ", required=False,
+                                         max_length=100, default=expense.get("note") or None)
+        self.add_item(self.amount)
+        self.add_item(self.note)
+
+    @guarded
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        satang = parse_baht(self.amount.value)
+        if satang is None:
+            await reply(interaction, "ยอดไม่ถูกต้อง ใส่ตัวเลขบวก ทศนิยมไม่เกิน 2 ตำแหน่ง เช่น `1,234.50`")
+            return
+        await apply_change(interaction, self.expense_id, amount_satang=satang, note=self.note.value.strip())
+
+
+class ConfirmButton(_ExpenseItem, discord.ui.DynamicItem[discord.ui.Button], template=rf"party:confirm:{UUID_RE}"):
+    def __init__(self, target: str, *, disabled: bool = False) -> None:
+        super().__init__(discord.ui.Button(label="ยืนยัน", emoji="✅", style=discord.ButtonStyle.success,
+                                           custom_id=f"party:confirm:{target}", disabled=disabled, row=2))
+        self.target = target
+
+    @guarded
+    async def callback(self, interaction: discord.Interaction) -> None:
+        ctx = await load_form(interaction, self.target)
+        if ctx is None:
+            return
+        expense, party, members = ctx
+        draft = sanitize_draft(expense, members)
+        fs = await current_form_state(interaction, draft, party)
+        if not fs.can_confirm:
+            await reply(interaction, "\n".join(fs.warnings) or "ยังยืนยันไม่ได้")
+            return
+        status = await run(_store(interaction).save_expense, expense["id"], str(interaction.user.id),
+                           amount_satang=draft["amount_satang"], payer_id=draft["payer_id"],
+                           note=draft.get("note") or "", shares=fs.shares)
+        if status != "ok":
+            await reply(interaction, SAVE_STATUS_TEXT.get(status, ERROR_TEXT))
+            return
+        await interaction.response.edit_message(content="✅ บันทึกแล้ว", embed=None, view=None)
+        await publish_expense(interaction.client, party, expense["id"])
+
+
+class CancelButton(_ExpenseItem, discord.ui.DynamicItem[discord.ui.Button], template=rf"party:cancel:{UUID_RE}"):
+    def __init__(self, target: str) -> None:
+        super().__init__(discord.ui.Button(label="ยกเลิก", style=discord.ButtonStyle.secondary,
+                                           custom_id=f"party:cancel:{target}", row=2))
+        self.target = target
+
+    @guarded
+    async def callback(self, interaction: discord.Interaction) -> None:
+        ctx = await load_form(interaction, self.target)
+        if ctx is None:
+            return
+        expense, party, _ = ctx
+        status = await run(_store(interaction).delete_expense, expense["id"], str(interaction.user.id))
+        if status != "ok":
+            await reply(interaction, SAVE_STATUS_TEXT.get(status, ERROR_TEXT))
+            return
+        await interaction.response.edit_message(content="ยกเลิกรายการนี้แล้ว", embed=None, view=None)
+        await delete_thread_message(interaction.client, party, expense.get("summary_message_id"))
+
+
+async def load_form(interaction: discord.Interaction, expense_id: str) -> tuple[dict, dict, list[str]] | None:
+    """โหลดรายการ + ปาร์ตี้ + สมาชิก แล้วตรวจสิทธิ์ (คนเพิ่มรายการ หรือ host) — ไม่ผ่านแจ้ง ephemeral แล้วคืน None"""
+    store = _store(interaction)
+    expense = await run(store.get_expense, expense_id)
+    if expense is None:
+        await reply(interaction, SAVE_STATUS_TEXT["not_found"])
+        return None
+    party = await run(store.get_party, expense["party_id"])
+    if party is None or party["status"] != "open":
+        await reply(interaction, SAVE_STATUS_TEXT["closed"])
+        return None
+    user_id = str(interaction.user.id)
+    if user_id not in (expense["created_by"], party["host_id"]):
+        await reply(interaction, SAVE_STATUS_TEXT["forbidden"])
+        return None
+    members = await run(store.members, party["id"])
+    return expense, party, members
+
+
+async def current_form_state(interaction: discord.Interaction, expense: dict, party: dict) -> FormState:
+    duplicate = await run(_store(interaction).is_duplicate_slip, party["id"], trans_ref=expense.get("trans_ref"),
+                          image_sha256=expense.get("image_sha256"), exclude_expense_id=expense["id"])
+    return form_state(expense, duplicate=duplicate, expired=is_expired(expense, datetime.now(timezone.utc)))
+
+
+async def render_form(
+    interaction: discord.Interaction, expense: dict, party: dict, members: list[str]
+) -> tuple[discord.Embed, discord.ui.View]:
+    expense = sanitize_draft(expense, members)
+    fs = await current_form_state(interaction, expense, party)
+    names = await member_names(interaction.guild, members)
+    view = discord.ui.View(timeout=None)
+    view.add_item(PayerSelect(expense["id"], [
+        discord.SelectOption(label=names[m], value=m, default=m == expense["payer_id"]) for m in members
+    ]))
+    view.add_item(SharesSelect(expense["id"], [
+        discord.SelectOption(label=names[m], value=m, default=m in expense["participants"]) for m in members
+    ]))
+    view.add_item(AmountButton(expense["id"]))
+    if expense["status"] == "draft":
+        view.add_item(ConfirmButton(expense["id"], disabled=not fs.can_confirm))
+        view.add_item(CancelButton(expense["id"]))
+    else:
+        for item in edit_mode_items(expense["id"]):
+            view.add_item(item)
+    return form_embed(expense, fs), view
+
+
+def edit_mode_items(expense_id: str) -> list[discord.ui.Item[Any]]:
+    """ปุ่มเพิ่มเติมตอนแก้รายการที่ยืนยันแล้ว (เติมใน Task 5)"""
+    return []
+
+
+async def apply_change(interaction: discord.Interaction, expense_id: str, **changes: Any) -> None:
+    """เปลี่ยนคนจ่าย / ผู้มีส่วน / ยอด / หมายเหตุ แล้ววาดฟอร์มใหม่
+    draft → เขียนลง draft ; รายการที่ยืนยันแล้ว → บันทึกใหม่ทันที (ตรวจทุกอย่างในฐานข้อมูล)"""
+    ctx = await load_form(interaction, expense_id)
+    if ctx is None:
+        return
+    expense, party, members = ctx
+    store = _store(interaction)
+    updated = sanitize_draft({**expense, **changes}, members)
+    if expense["status"] == "draft":
+        row = await run(store.update_draft, expense_id, payer_id=updated["payer_id"],
+                        participants=updated["participants"], amount_satang=updated.get("amount_satang"),
+                        note=updated.get("note") or "")
+        if row is None:
+            await reply(interaction, "รายการนี้ยืนยันหรือยกเลิกไปแล้ว")
+            return
+    else:
+        status = await run(store.save_expense, expense_id, str(interaction.user.id),
+                           amount_satang=updated["amount_satang"], payer_id=updated["payer_id"],
+                           note=updated.get("note") or "", shares=split(updated["amount_satang"], updated["participants"]))
+        if status != "ok":
+            await reply(interaction, SAVE_STATUS_TEXT.get(status, ERROR_TEXT))
+            return
+    fresh = await run(store.get_expense, expense_id)
+    embed, view = await render_form(interaction, fresh or updated, party, members)
+    await interaction.response.edit_message(embed=embed, view=view)
+    if expense["status"] == "confirmed":
+        await publish_expense(interaction.client, party, expense_id)
+
+
+def shares_of(expense: dict) -> dict[str, int]:
+    rows = expense.get("party_expense_shares") or []
+    return {r["discord_id"]: int(r["share_satang"]) for r in sorted(rows, key=lambda r: int(r["discord_id"]))}
+
+
+async def publish_expense(bot: discord.Client, party: dict, expense_id: str) -> None:
+    """โพสต์/อัปเดตสรุปรายการใน thread (แทนข้อความ "พบสลิป" ถ้ามี)"""
+    store: PartyStore = bot.party_store  # type: ignore[attr-defined]
+    expense = await run(store.get_expense, expense_id)
+    thread = await get_thread(bot, party["thread_id"])
+    if expense is None or thread is None:
+        return
+    embed = expense_summary_embed(expense, shares_of(expense))
+    if expense.get("summary_message_id"):
+        try:
+            message = await thread.fetch_message(int(expense["summary_message_id"]))
+            await message.edit(content=None, embed=embed, view=None)
+            return
+        except discord.HTTPException:
+            pass
+    message = await thread.send(embed=embed)
+    await run(store.update_expense_message, expense_id, str(message.id))
+
+
+async def delete_thread_message(bot: discord.Client, party: dict, message_id: str | None) -> None:
+    if not message_id:
+        return
+    thread = await get_thread(bot, party["thread_id"])
+    if thread is None:
+        return
+    try:
+        await thread.get_partial_message(int(message_id)).delete()
+    except discord.HTTPException as e:
+        log.warning("ลบข้อความ %s ไม่สำเร็จ: %s", message_id, e)
+
+
+@party_group.command(name="add", description="เพิ่มค่าใช้จ่ายแบบไม่มีสลิป (เช่น จ่ายเงินสด)")
+@app_commands.rename(amount="ยอด", note="หมายเหตุ")
+@app_commands.describe(amount="ยอดเงิน (บาท) เช่น 250 หรือ 1,234.50", note="เช่น ค่าหมูกระทะ")
+@guarded
+async def add_cmd(interaction: discord.Interaction, amount: app_commands.Range[str, 1, 20],
+                  note: app_commands.Range[str, 0, 100] = "") -> None:
+    party = await party_here(interaction)
+    if party is None:
+        return
+    if party["status"] != "open":
+        await reply(interaction, SAVE_STATUS_TEXT["closed"])
+        return
+    satang = parse_baht(amount)
+    if satang is None:
+        await reply(interaction, "ยอดไม่ถูกต้อง ใส่ตัวเลขบวก ทศนิยมไม่เกิน 2 ตำแหน่ง เช่น `1,234.50`")
+        return
+    store = _store(interaction)
+    members = await run(store.members, party["id"])
+    user_id = str(interaction.user.id)
+    if user_id not in members:
+        await reply(interaction, "เฉพาะสมาชิกปาร์ตี้เท่านั้นที่เพิ่มรายการได้")
+        return
+    draft = await run(store.create_draft, party["id"], created_by=user_id, payer_id=user_id, participants=members,
+                      amount_satang=satang, note=note.strip(), source="cash")
+    embed, view = await render_form(interaction, draft, party, members)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
+async def handle_party_slips(bot: SlipBot, message: discord.Message, party: dict) -> None:
+    """รูปสลิปใน thread ปาร์ตี้ → อ่านยอด → สร้าง draft → ปุ่ม [ตรวจ/ยืนยัน] ให้คนอัป"""
+    images = [a for a in message.attachments if is_image_attachment(a.filename, a.content_type)]
+    if not images:
+        return
+    store = bot.party_store
+    user_id = str(message.author.id)
+    if party["status"] != "open":
+        await message.reply("ปาร์ตี้นี้ปิดแล้ว เพิ่มรายการไม่ได้", mention_author=False)
+        return
+    members = await run(store.members, party["id"])
+    if user_id not in members:
+        await message.reply("เฉพาะสมาชิกปาร์ตี้เท่านั้นที่เพิ่มรายการได้", mention_author=False)
+        return
+    for attachment in images:
+        data = await attachment.read()
+        sha = hashlib.sha256(data).hexdigest()
+        qr = await asyncio.to_thread(slip_qr.read_slip_qr, data) or {}
+        trans_ref = qr.get("trans_ref") or None
+        if await run(store.is_duplicate_slip, party["id"], trans_ref=trans_ref, image_sha256=sha):
+            await message.reply("⛔ " + SAVE_STATUS_TEXT["duplicate"], mention_author=False)
+            continue
+        async with message.channel.typing(), bot._ocr_slot:
+            slip = await asyncio.to_thread(slip_reader.read_slip, data, bot.cfg.typhoon_api_key,
+                                           bot.cfg.typhoon_llm_model, guess_mime(attachment.filename, attachment.content_type))
+        amount = amount_to_satang(slip.amount)
+        draft = await run(store.create_draft, party["id"], created_by=user_id, payer_id=user_id, participants=members,
+                          amount_satang=amount, note="", source="slip", trans_ref=trans_ref, image_sha256=sha,
+                          slip_message_url=message.jump_url)
+        text = f"พบสลิป {baht(amount)}" if amount else "พบสลิป แต่อ่านยอดไม่ได้"
+        view = discord.ui.View(timeout=None)
+        view.add_item(OpenDraftButton(draft["id"]))
+        sent = await message.reply(f"🧾 {text} — {mention(user_id)} กดปุ่มเพื่อตรวจและยืนยัน", view=view,
+                                   mention_author=False)
+        await run(store.update_expense_message, draft["id"], str(sent.id))
+
+
 # =====================================================================
 # ลงทะเบียนกับบอท
 # =====================================================================
 
-DYNAMIC_ITEMS: list[type[discord.ui.DynamicItem[Any]]] = [JoinButton]
+DYNAMIC_ITEMS: list[type[discord.ui.DynamicItem[Any]]] = [
+    JoinButton, OpenDraftButton, PayerSelect, SharesSelect, AmountButton, ConfirmButton, CancelButton,
+]
 
 
 def setup(bot: SlipBot, store: PartyStore) -> None:
@@ -310,4 +754,11 @@ async def handle_message(bot: SlipBot, message: discord.Message) -> bool:
     if not isinstance(message.channel, discord.Thread):
         return False
     party = await run(bot.party_store.party_by_thread, str(message.channel.id))
-    return party is not None
+    if party is None:
+        return False
+    try:
+        await handle_party_slips(bot, message, party)
+    except Exception:
+        log.exception("ประมวลผลสลิปในปาร์ตี้ไม่สำเร็จ")
+        await message.reply("ประมวลผลสลิปไม่สำเร็จ ลองส่งใหม่อีกครั้ง", mention_author=False)
+    return True

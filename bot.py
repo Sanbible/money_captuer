@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-import os
 import re
 import sys
 from dataclasses import dataclass
@@ -31,6 +30,10 @@ from config import BOT_REQUIRED, Config, ConfigError, load_config
 from party_store import PartyStore
 from slip_common import (  # noqa: F401 — re-export ให้ tests/test_bot_helpers.py
     BKK_TZ,
+    IMAGE_EXTENSIONS,
+    IMAGE_MIME_TYPES,
+    guess_mime,
+    is_image_attachment,
     bkk_now,
     load_bkk_tz,
     normalize_slip_date,
@@ -52,10 +55,6 @@ EMOJI_WORKING = "⏳"
 EMOJI_OK = "✅"
 EMOJI_FAIL = "❌"
 
-# content_type ที่รับ -> mime ที่ส่งให้ Typhoon
-IMAGE_MIME_TYPES = {"image/png": "image/png", "image/jpeg": "image/jpeg", "image/jpg": "image/jpeg"}
-IMAGE_EXTENSIONS = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
-
 FIELD_LIMIT = 1024  # ความยาวสูงสุดของค่าใน embed field
 
 
@@ -71,27 +70,6 @@ def format_baht(amount: float | None) -> str:
 def format_amount_plain(amount: float | None) -> str:
     """ค่าเริ่มต้นในช่องกรอกยอดของ modal: 1234.5 -> "1234.50" ; None -> "" """
     return "" if amount is None else f"{amount:.2f}"
-
-
-def _content_type(content_type: str | None) -> str:
-    return (content_type or "").split(";", 1)[0].strip().lower()
-
-
-def _extension(filename: str | None) -> str:
-    return os.path.splitext(filename or "")[1].lower()
-
-
-def is_image_attachment(filename: str | None, content_type: str | None) -> bool:
-    """ไฟล์แนบเป็นรูป PNG/JPEG หรือไม่ (ดูจาก content_type หรือนามสกุลไฟล์)"""
-    return _content_type(content_type) in IMAGE_MIME_TYPES or _extension(filename) in IMAGE_EXTENSIONS
-
-
-def guess_mime(filename: str | None, content_type: str | None) -> str:
-    """mime type ที่จะส่งให้ OCR — เชื่อ content_type ก่อน แล้วค่อยดูนามสกุล, ไม่รู้ใช้ image/png"""
-    ct = _content_type(content_type)
-    if ct in IMAGE_MIME_TYPES:
-        return IMAGE_MIME_TYPES[ct]
-    return IMAGE_EXTENSIONS.get(_extension(filename), "image/png")
 
 
 _MONTH_ARG_RE = re.compile(r"(\d{4})-(\d{1,2})")
