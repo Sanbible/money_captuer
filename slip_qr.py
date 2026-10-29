@@ -6,7 +6,7 @@ QR สลิป (slip-verify / mini QR) มีแค่ API ID, รหัสธ�
     tag 00 = ก้อนข้อมูลหลัก -> sub-tag 00 API ID, 01 รหัสธนาคาร (3 หลัก), 02 transRef
     tag 51 = ประเทศ ("TH"), tag 91 = CRC
 
-ทุกฟังก์ชันเป็น blocking (bot.py ห่อด้วย asyncio.to_thread)
+ทุกฟังก์ชันเป็น blocking (web ห่อด้วย asyncio.to_thread)
 """
 
 from __future__ import annotations

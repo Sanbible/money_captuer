@@ -1,7 +1,7 @@
-"""เก็บรายจ่ายในตาราง `expenses` ของ Supabase ผ่าน PostgREST (ใช้ทั้งบอทและเว็บ)
+"""เก็บรายจ่ายในตาราง `expenses` ของ Supabase ผ่าน PostgREST (รายจ่ายส่วนตัวของเว็บ)
 
 ใช้ service-role key (ข้าม RLS) — ทุก method ที่อ่าน/ลบต้องระบุเจ้าของ (user_id และ/หรือ discord_id)
-ทุก method เป็น blocking (bot.py / web ห่อด้วย asyncio.to_thread)
+ทุก method เป็น blocking (web ห่อด้วย asyncio.to_thread)
 schema: supabase/schema.sql
 ทดสอบกับ Supabase จริง: python store.py   (ต้องมี SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY ใน .env)
 """

@@ -1,6 +1,6 @@
 """อ่านสลิปโอนเงิน: Typhoon OCR → Typhoon LLM (ดึง JSON) → regex สำรอง
 
-ทุกฟังก์ชันเป็น blocking — bot.py ต้องห่อด้วย asyncio.to_thread
+ทุกฟังก์ชันเป็น blocking — ผู้เรียกต้องห่อด้วย asyncio.to_thread
 ทดสอบด้วยมือ: python slip_reader.py path/to/slip.jpg   (ต้องมี TYPHOON_API_KEY ใน .env)
 """
 from __future__ import annotations

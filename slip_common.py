@@ -1,4 +1,4 @@
-"""helper กลางที่บอท Discord (bot.py) และเว็บ (web/) ใช้ร่วมกัน — pure functions ไม่ต่อ network"""
+"""helper กลางของเว็บ (web/) และงานอ่านสลิป — pure functions ไม่ต่อ network"""
 from __future__ import annotations
 
 import os

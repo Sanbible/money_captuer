@@ -1,7 +1,7 @@
 # Money Capture
 
-เว็บ + บอท Discord สำหรับจดรายจ่ายส่วนตัวจากสลิปโอนเงินของธนาคารไทย — อัปโหลดรูปสลิป ระบบอ่านยอดเงิน วันที่ และผู้รับให้อัตโนมัติ
-แล้วสรุปเป็นกราฟรายเดือน แต่ละคน login แล้วเห็นเฉพาะรายการของตัวเอง
+เว็บจดรายจ่ายจากสลิปโอนเงินของธนาคารไทย — อัปโหลดรูปสลิป ระบบอ่านยอดเงิน วันที่ และผู้รับให้อัตโนมัติ
+แล้วสรุปเป็นกราฟรายเดือน และมี **ปาร์ตี้หารค่าใช้จ่าย** สำหรับทริป/มื้ออาหารกับเพื่อน แต่ละคน login แล้วเห็นเฉพาะข้อมูลของตัวเอง
 
 - **Live URL:** https://money-capture.onrender.com
 - **GitHub:** https://github.com/Sanbible/money_capture
@@ -14,59 +14,65 @@
 |---|---|
 | Backend / API | Python 3.12, FastAPI, Uvicorn |
 | หน้าเว็บ | HTML + CSS + JavaScript (ไม่ใช้ framework), Chart.js |
-| Login | Supabase Auth (OAuth ด้วย Discord) ผ่าน supabase-js |
-| ฐานข้อมูล | Supabase Postgres (PostgREST) เปิด Row Level Security |
+| Login | Supabase Auth (Discord, Google, อีเมล) ผ่าน supabase-js |
+| ฐานข้อมูล | Supabase Postgres (PostgREST + SQL functions) เปิด Row Level Security |
 | อ่านสลิป | OpenCV (อ่าน QR), Typhoon OCR + Typhoon LLM (ดึงยอด/วันที่/ผู้รับ) |
-| บอท | discord.py |
 | Deploy | Render (web service), GitHub |
 | Test | pytest, FastAPI TestClient, httpx MockTransport |
 
 ## ทำอะไรได้บ้าง
 
-- **Login ด้วย Discord** — ไม่ต้องสมัครหรือจำรหัสผ่าน
+**รายจ่ายส่วนตัว**
+- **Login** ด้วย Discord / Google / อีเมล — ไม่ต้องจำรหัสผ่าน
 - **อัปโหลดสลิป** (PNG/JPEG) → อ่าน QR เพื่อได้เลขอ้างอิงธุรกรรม + OCR อ่านยอด → ตรวจ/แก้ → เลือกหมวด → บันทึก
 - **กันบันทึกซ้ำ** ด้วยเลขอ้างอิงจาก QR (นับเฉพาะข้อมูลของคนเดียวกัน)
 - **Dashboard** — ยอดรวมของเดือน, กราฟแยกตามหมวด, กราฟย้อนหลัง 6 เดือน, ตารางรายการ (ลบได้)
-- **บอท Discord** — ส่งสลิปเข้าช่องที่กำหนดก็บันทึกได้เหมือนกัน และ `!สรุป` ดูยอดรายเดือน
-- **ปาร์ตี้หารค่าใช้จ่าย** (บอท Discord) — `/party` สำหรับทริป/มื้ออาหาร สรุปใครโอนให้ใครแบบโอนน้อยครั้งที่สุด
-  รายการจากบอทจะขึ้นในเว็บอัตโนมัติเมื่อ login ด้วยบัญชี Discord เดียวกัน
+
+**ปาร์ตี้หารค่าใช้จ่าย** (หน้า "ปาร์ตี้")
+- สร้างปาร์ตี้ แล้วชวนเพื่อนด้วย **ลิงก์เชิญ** หรือ **โค้ด 6 ตัว** (สูงสุด 10 คนรวม host)
+- ใครจ่ายอะไรก็อัปสลิปหรือใส่ยอดเงินสด แล้วเลือก **คนจ่าย** และ **ผู้มีส่วน** — ทุกคนในปาร์ตี้เห็นทุกรายการ
+- ดูยอดสุทธิของแต่ละคนได้ตลอด แก้/ลบรายการได้ (คนเพิ่มรายการ หรือ host)
+- host ปิดปาร์ตี้ → ระบบสรุปว่า **ใครต้องโอนให้ใครเท่าไหร่ โดยโอนน้อยครั้งที่สุด** → กด **โอนแล้ว** ครบ = เคลียร์
+- เงินคำนวณเป็นสตางค์ทั้งหมด หารไม่ลงตัวแจกเศษทีละสตางค์ (100 บาท 3 คน → 33.34 / 33.33 / 33.33)
+- สลิปเดียวกัน (เลขอ้างอิงหรือรูปเดียวกัน) บันทึกในปาร์ตี้ซ้ำไม่ได้; ปิดแล้วเพิ่ม/แก้ไม่ได้ — กฎเหล่านี้บังคับในฐานข้อมูล
+  (SQL functions ล็อกแถว) จึงถูกต้องแม้หลายคนกดพร้อมกัน
 
 ## สถาปัตยกรรม
 
 ```
-Browser ──(supabase-js: login ด้วย Discord)──▶ Supabase Auth
+Browser ──(supabase-js: login)──▶ Supabase Auth
    │  Authorization: Bearer <access token>
    ▼
 FastAPI (Render) ──▶ slip_qr / slip_reader ──▶ Typhoon API
-   │  ตรวจ token กับ Supabase Auth แล้วกรองทุก query ด้วย user_id
+   │  ตรวจ token กับ Supabase Auth แล้วตรวจสิทธิ์ทุก request (เจ้าของรายการ / สมาชิกปาร์ตี้)
    ▼
-Supabase Postgres (ตาราง expenses) ◀── bot.py (Discord)
+Supabase Postgres: expenses (รายจ่ายส่วนตัว) · parties / party_* (ปาร์ตี้ + SQL functions)
 ```
 
 - browser ได้แค่ Supabase URL + publishable key; **service-role key อยู่ฝั่ง server เท่านั้น**
-- ตาราง `expenses` เปิด RLS โดยไม่มี policy ให้ browser — อ่านเขียนได้ผ่าน API ของเว็บเท่านั้น
-- บอทบันทึกด้วย Discord ID ของคนส่ง เมื่อคนนั้น login เว็บด้วย Discord ระบบจะผูกรายการเหล่านั้นเข้าบัญชีให้ (`claim_discord_expenses` ใน [supabase/schema.sql](supabase/schema.sql))
+- ทุกตารางเปิด RLS โดยไม่มี policy ให้ browser — อ่านเขียนได้ผ่าน API ของเว็บเท่านั้น
+- คำนวณเงินของปาร์ตี้อยู่ใน `party_math.py` (pure function มี unit test รวม property test)
 
 ## โครงสร้างโปรเจกต์
 
 ```
 money_capture/
 ├── web/
-│   ├── app.py           # FastAPI: หน้าเว็บ + /api/* (อัปโหลด/บันทึก/ลบ/สรุป)
+│   ├── app.py           # FastAPI: หน้าเว็บ + /api/* รายจ่ายส่วนตัว
+│   ├── parties.py       # /api/parties/* ปาร์ตี้หารค่าใช้จ่าย
 │   ├── auth.py          # ตรวจ access token กับ Supabase Auth
 │   ├── slips.py         # อ่านสลิปที่อัปโหลด (ใช้ slip_qr + slip_reader)
-│   └── static/          # index / dashboard / settings + JS + CSS
-├── store.py             # อ่าน/เขียนตาราง expenses ผ่าน PostgREST (ใช้ทั้งเว็บและบอท)
-├── bot.py               # บอท Discord
-├── party_bot.py         # ปาร์ตี้หารค่าใช้จ่าย: คำสั่ง /party + ปุ่ม/เมนูที่ใช้ได้หลังรีสตาร์ท
-├── party_math.py        # คำนวณหาร / ยอดสุทธิ / รายการโอน (สตางค์, pure)
-├── party_store.py       # ตารางปาร์ตี้ใน Supabase + ฟังก์ชัน SQL
+│   └── static/          # หน้าเว็บ (dashboard, ปาร์ตี้, ตั้งค่า) + JS + CSS
+├── store.py             # ตาราง expenses ผ่าน PostgREST
+├── party_store.py       # ตารางปาร์ตี้ + เรียก SQL functions
+├── party_math.py        # หาร / ยอดสุทธิ / รายการโอน (สตางค์)
 ├── slip_qr.py           # อ่าน QR + แปลง EMVCo TLV
 ├── slip_reader.py       # Typhoon OCR + Typhoon LLM + regex สำรอง
-├── slip_common.py       # helper กลาง (วันที่ เวลา ยอดเงิน เขตเวลาไทย)
+├── slip_common.py       # helper กลาง (วันที่ เวลา ยอดเงิน เขตเวลาไทย ชนิดรูป)
 ├── config.py            # โหลดค่าตั้งค่าจาก .env
-├── supabase/schema.sql  # ตาราง + index + RLS + ฟังก์ชันผูกรายการ
-├── supabase/party_schema.sql  # ตารางปาร์ตี้ + ฟังก์ชันที่กันการกดพร้อมกัน
+├── supabase/
+│   ├── schema.sql       # ตาราง expenses + RLS
+│   └── party_schema.sql # ตารางปาร์ตี้ + SQL functions (ล็อกแถว กันกดพร้อมกัน)
 ├── render.yaml          # ตั้งค่า deploy บน Render
 └── tests/               # unit tests
 ```
@@ -87,24 +93,17 @@ pip install -r requirements.txt
 
 ถ้าไม่ activate venv ให้ใช้ `.\.venv\Scripts\python.exe` แทน `python` ในทุกคำสั่ง
 
-### 2) เตรียมบัญชี
+### 2) เตรียม Supabase
 
-**Supabase (ฐานข้อมูล + login)**
 1. สร้างโปรเจกต์ที่ https://supabase.com
-2. **SQL Editor → New query** → วางเนื้อหาไฟล์ [supabase/schema.sql](supabase/schema.sql) → **Run**
+2. **SQL Editor → New query** → วาง [supabase/schema.sql](supabase/schema.sql) → **Run** แล้วทำซ้ำกับ
+   [supabase/party_schema.sql](supabase/party_schema.sql)
 3. **Project Settings → API Keys** → คัดลอก Project URL, Publishable key และ Secret key
-4. **Authentication → Sign In / Providers → Discord** → เปิด แล้วใส่ Client ID / Client Secret ของแอป Discord
-   (Discord Developer Portal → แอป → OAuth2) และนำ **Callback URL** ที่ Supabase แสดงไปใส่ใน **Redirects** ของแอป Discord
+4. **Authentication → Sign In / Providers** → เปิด Discord / Google / Email ตามต้องการ
+   (Discord/Google ต้องใส่ Client ID / Secret และนำ **Callback URL** ของ Supabase ไปใส่ในแอปฝั่งนั้น)
 5. **Authentication → URL Configuration** → Site URL = URL ของเว็บ, Redirect URLs เพิ่ม `https://<เว็บ>/**` และ `http://127.0.0.1:8000/**`
 
-**Typhoon (อ่านสลิป)** — สมัครที่ https://opentyphoon.ai แล้วสร้าง API key
-แผนฟรีมี rate limit 20 request/นาที
-
-**บอท Discord (ถ้าจะใช้บอท)**
-1. [Discord Developer Portal](https://discord.com/developers/applications) → New Application → เมนู **Bot** → Reset Token (ใช้เป็น `DISCORD_TOKEN`)
-2. หน้า Bot → เปิด **Message Content Intent**
-3. **OAuth2 → URL Generator** → scope `bot` + สิทธิ์ View Channels, Send Messages, Read Message History, Add Reactions, Embed Links → เชิญเข้าเซิร์ฟเวอร์
-4. เปิด Developer Mode ใน Discord → คลิกขวาที่ช่อง → Copy Channel ID (ใช้เป็น `DISCORD_CHANNEL_ID`)
+**Typhoon (อ่านสลิป)** — สมัครที่ https://opentyphoon.ai แล้วสร้าง API key (แผนฟรี 20 request/นาที)
 
 ### 3) ตั้งค่า `.env`
 
@@ -112,26 +111,24 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-| ตัวแปร | ใช้กับ | คำอธิบาย |
-|---|---|---|
-| `SUPABASE_URL` | เว็บ + บอท | Project URL ของ Supabase |
-| `SUPABASE_ANON_KEY` | เว็บ | Publishable key (`sb_publishable_...`) — ส่งให้ browser ได้ |
-| `SUPABASE_SERVICE_ROLE_KEY` | เว็บ + บอท | Secret key (`sb_secret_...`) — **ห้ามแชร์ ห้าม commit** |
-| `PUBLIC_BASE_URL` | บอท | URL ของเว็บ (บอทแนบลิงก์ไป dashboard หลังบันทึก) ไม่ใส่ก็ได้ |
-| `TYPHOON_API_KEY` | เว็บ + บอท | API key จาก opentyphoon.ai |
-| `TYPHOON_LLM_MODEL` | เว็บ + บอท | ค่าเริ่มต้น `typhoon-v2.5-30b-a3b-instruct` |
-| `DISCORD_TOKEN` | บอท | token ของบอท — **ห้ามแชร์** |
-| `DISCORD_CHANNEL_ID` | บอท | ช่องที่บอทอ่านสลิป |
-| `CATEGORIES` | เว็บ + บอท | หมวดรายจ่าย คั่นด้วย `,` (ไม่เกิน 25 หมวด) |
+| ตัวแปร | คำอธิบาย |
+|---|---|
+| `SUPABASE_URL` | Project URL ของ Supabase |
+| `SUPABASE_ANON_KEY` | Publishable key (`sb_publishable_...`) — ส่งให้ browser ได้ |
+| `SUPABASE_SERVICE_ROLE_KEY` | Secret key (`sb_secret_...`) — **ห้ามแชร์ ห้าม commit** |
+| `PUBLIC_BASE_URL` | URL ของเว็บ (ใช้สร้างลิงก์เชิญปาร์ตี้) ไม่ใส่ก็ได้ |
+| `TYPHOON_API_KEY` | API key จาก opentyphoon.ai |
+| `TYPHOON_LLM_MODEL` | ค่าเริ่มต้น `typhoon-v2.5-30b-a3b-instruct` |
+| `CATEGORIES` | หมวดรายจ่าย คั่นด้วย `,` (ไม่เกิน 25 หมวด) |
 
 ### 4) รัน
 
 ```powershell
 python -m pytest -q                                                   # unit tests (ไม่ต้องมี .env)
-python store.py                                                       # ทดสอบต่อ Supabase จริง (เพิ่มแถวทดสอบ discord_id=smoke)
+python store.py                                                       # ทดสอบตาราง expenses กับ Supabase จริง
+python party_store.py                                                 # ทดสอบ SQL functions ของปาร์ตี้กับ Supabase จริง
 python slip_reader.py path\to\slip.jpg                                # ทดสอบอ่านสลิปด้วย Typhoon
 python -m uvicorn web.app:create_default_app --factory --reload      # เว็บ → http://127.0.0.1:8000
-python bot.py                                                         # บอท Discord
 ```
 
 ## Deploy บน Render
@@ -141,55 +138,19 @@ python bot.py                                                         # บอ�
 3. กรอก env vars ที่ขึ้นว่า `sync: false` (ค่าเดียวกับ `.env`, `PUBLIC_BASE_URL` = URL ที่ Render ให้)
 4. เพิ่ม URL ของ Render ใน Supabase → Authentication → URL Configuration (ดูข้อ 2)
 
-## วิธีใช้บอท Discord
-
-1. ส่งรูปสลิปเข้าช่อง `DISCORD_CHANNEL_ID` → บอทขึ้น ⏳ แล้ว reply ยอด/วันที่/ผู้รับ
-2. เลือกหมวดจากเมนู (หรือกด **แก้ไข** / **ยกเลิก**) — กดได้เฉพาะคนที่ส่งสลิป และหมดอายุใน 24 ชั่วโมง
-3. อ่านยอดไม่ได้ → บอทเปิดหน้าต่างให้พิมพ์ยอดเอง
-4. `!สรุป` หรือ `!สรุป 2026-10` → ยอดรวมแยกหมวดของเดือนนั้น (เฉพาะสลิปของคนที่สั่ง)
-
-## ปาร์ตี้หารค่าใช้จ่าย (บอท Discord)
-
-กลุ่มเพื่อน (สูงสุด 10 คน) ใครจ่ายอะไรก็อัปสลิป เลือกว่าใครมีส่วน แล้วบอทสรุปว่าใครต้องโอนให้ใครเท่าไหร่ โดยโอนน้อยครั้งที่สุด
-
-**ตั้งค่าครั้งเดียว**
-1. Supabase → **SQL Editor** → วางไฟล์ [supabase/party_schema.sql](supabase/party_schema.sql) → **Run**
-2. สิทธิ์บอท (Developer Portal → OAuth2 → URL Generator): scope `bot` + `applications.commands` และสิทธิ์
-   ดูแชนแนล, ส่งข้อความ, สร้างเธรดส่วนตัว, ส่งข้อความในเธรด, จัดการเธรด, ฝังลิงก์, อ่านประวัติข้อความ, เพิ่มรีแอคชั่น
-   → เปิดลิงก์แล้วเลือกเซิร์ฟเวอร์เดิม
-3. `python party_store.py` — ทดสอบฟังก์ชัน SQL กับ Supabase จริง (สร้างแล้วลบปาร์ตี้ทดสอบเอง)
-
-**คำสั่ง**
-
-| คำสั่ง | ใช้ที่ | ทำอะไร |
-|---|---|---|
-| `/party create <ชื่อ>` | ช่องข้อความ | สร้างปาร์ตี้ + thread ส่วนตัว + ข้อความเชิญพร้อมปุ่ม **เข้าร่วม** และโค้ด |
-| `/party join <โค้ด>` | ที่ไหนก็ได้ | เข้าร่วมด้วยโค้ด (หรือกดปุ่มเข้าร่วมในข้อความเชิญ) |
-| ส่งรูปสลิปใน thread | thread ปาร์ตี้ | บอทอ่านยอด → กด **ตรวจ/ยืนยัน** → เลือกคนจ่าย / ผู้มีส่วน → ยืนยัน |
-| `/party add <ยอด> [หมายเหตุ]` | thread ปาร์ตี้ | เพิ่มรายการเงินสด (ไม่มีสลิป) |
-| `/party status` | thread ปาร์ตี้ | รายการทั้งหมด + ยอดสุทธิของแต่ละคน + ปุ่มแก้/ลบ |
-| `/party leave` / `/party kick <สมาชิก>` | thread ปาร์ตี้ | ออกเอง / host เตะ (เฉพาะคนที่ยังไม่มีรายการเกี่ยวข้อง) |
-| `/party end` | thread ปาร์ตี้ | (host) ล็อกปาร์ตี้ → สรุปการโอน + ปุ่ม **โอนแล้ว** ครบ → เคลียร์ |
-
-- เงินคำนวณเป็นสตางค์ทั้งหมด หารไม่ลงตัวแจกเศษทีละสตางค์ (เช่น 100 บาท 3 คน → 33.34 / 33.33 / 33.33)
-- สลิปเดียวกัน (เลขอ้างอิงหรือรูปเดียวกัน) บันทึกในปาร์ตี้ซ้ำไม่ได้
-- สลิปใน thread ปาร์ตี้ไม่เข้า flow รายจ่ายส่วนตัว
-- ปุ่ม/เมนูทุกตัวยังใช้ได้หลังบอทรีสตาร์ท (ข้อมูลทั้งหมดอยู่ใน Supabase)
-
 ## ความปลอดภัย / ความเป็นส่วนตัว
 
 - `.env` อยู่ใน `.gitignore` — ตรวจก่อน push ทุกครั้งว่าไม่มีคีย์หลุด
-- **รูปสลิปถูกส่งไป Typhoon API** (บริษัทภายนอก) เพื่อทำ OCR
-- ระบบ**ไม่ได้ตรวจสลิปปลอมกับธนาคาร** เป็นเครื่องมือจดรายจ่ายเท่านั้น
+- **รูปสลิปถูกส่งไป Typhoon API** (บริษัทภายนอก) เพื่อทำ OCR; ระบบไม่เก็บไฟล์รูป
+- ระบบ**ไม่ได้ตรวจสลิปปลอมกับธนาคาร** และปุ่ม "โอนแล้ว" เชื่อตามที่สมาชิกกด
+- ปาร์ตี้ที่ไม่ได้เป็นสมาชิก เปิดดูไม่ได้ (API ตอบเหมือนไม่มีปาร์ตี้นั้น)
 
 ## แก้ปัญหาที่พบบ่อย
 
-**Login แล้วเด้งกลับหน้าแรก / ขึ้น redirect error** — ตรวจ Redirect URLs ใน Supabase (ต้องมี URL ของเว็บตามด้วย `/**`) และ Redirects ในแอป Discord ต้องเป็น Callback URL ของ Supabase
-
-**บอทไม่ตอบเมื่อส่งรูป** — เปิด Message Content Intent แล้วหรือยัง, ส่งเข้าช่องที่ตรงกับ `DISCORD_CHANNEL_ID` หรือไม่, บอทมีสิทธิ์ในช่องนั้นครบหรือไม่
+**Login แล้วเด้งกลับหน้าแรก / ขึ้น redirect error** — ตรวจ Redirect URLs ใน Supabase (ต้องมี URL ของเว็บตามด้วย `/**`) และ Redirects ในแอป Discord/Google ต้องเป็น Callback URL ของ Supabase
 
 **Error 429 จาก Typhoon** — ส่งถี่เกิน rate limit ฟรี รอสักพักแล้วลองใหม่
 
-**ไม่กันบันทึกซ้ำ** — สลิปบางประเภท (เช่นจากแอปเป๋าตัง) ไม่มี QR จึงไม่มีเลขอ้างอิงให้เทียบ
+**ไม่กันบันทึกซ้ำ** — สลิปบางประเภท (เช่นจากแอปเป๋าตัง) ไม่มี QR จึงไม่มีเลขอ้างอิงให้เทียบ (ในปาร์ตี้ยังกันรูปเดียวกันซ้ำได้)
 
 **วันที่คลาดไป 543 ปี** — สลิปไทยพิมพ์ปี พ.ศ. ระบบแปลงให้แล้ว ถ้ายังผิดให้แก้วันที่ในฟอร์มก่อนบันทึก

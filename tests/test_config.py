@@ -4,11 +4,9 @@ from __future__ import annotations
 import pytest
 
 import config
-from config import BOT_REQUIRED, WEB_REQUIRED, ConfigError, load_config
+from config import WEB_REQUIRED, ConfigError, load_config
 
 ENV = {
-    "DISCORD_TOKEN": "discord-token",
-    "DISCORD_CHANNEL_ID": "123",
     "TYPHOON_API_KEY": "typhoon-key",
     "SUPABASE_URL": "https://example.supabase.co",
     "SUPABASE_ANON_KEY": "sb_publishable_x",
@@ -32,23 +30,15 @@ def test_web_config_reads_supabase_settings():
     assert cfg.supabase_service_role_key == "sb_secret_x"
 
 
-def test_web_config_does_not_need_discord(monkeypatch):
-    monkeypatch.delenv("DISCORD_TOKEN")
-    monkeypatch.delenv("DISCORD_CHANNEL_ID")
-    cfg = load_config(required=WEB_REQUIRED)
-    assert cfg.discord_channel_id == 0
-
-
-@pytest.mark.parametrize("required", [WEB_REQUIRED, BOT_REQUIRED])
-def test_missing_supabase_url_raises(monkeypatch, required):
+def test_missing_supabase_url_raises(monkeypatch):
     monkeypatch.delenv("SUPABASE_URL")
     with pytest.raises(ConfigError, match="SUPABASE_URL"):
-        load_config(required=required)
+        load_config(required=WEB_REQUIRED)
 
 
-def test_bot_config_does_not_need_google_sheet():
-    cfg = load_config(required=BOT_REQUIRED)
-    assert not hasattr(cfg, "google_sheet_id")
+def test_config_has_no_discord_bot_settings():
+    cfg = load_config(required=WEB_REQUIRED)
+    assert not hasattr(cfg, "discord_token") and not hasattr(cfg, "google_sheet_id")
 
 
 def test_public_base_url_defaults_to_empty():

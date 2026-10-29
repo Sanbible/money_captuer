@@ -21,22 +21,14 @@ ENV_DEFAULTS = {
     "TYPHOON_LLM_MODEL": DEFAULT_LLM_MODEL,
 }
 
-# บอท Discord (python bot.py)
-BOT_REQUIRED = (
-    "DISCORD_TOKEN",
-    "DISCORD_CHANNEL_ID",
-    "TYPHOON_API_KEY",
-    "SUPABASE_URL",
-    "SUPABASE_SERVICE_ROLE_KEY",
-)
-# เว็บ (uvicorn web.app:create_default_app --factory) — ไม่ต้องมี Discord
+# เว็บ (uvicorn web.app:create_default_app --factory)
 WEB_REQUIRED = (
     "TYPHOON_API_KEY",
     "SUPABASE_URL",
     "SUPABASE_ANON_KEY",
     "SUPABASE_SERVICE_ROLE_KEY",
 )
-ALL_REQUIRED = BOT_REQUIRED
+ALL_REQUIRED = WEB_REQUIRED
 
 
 class ConfigError(RuntimeError):
@@ -45,8 +37,6 @@ class ConfigError(RuntimeError):
 
 @dataclass(frozen=True)
 class Config:
-    discord_token: str
-    discord_channel_id: int
     typhoon_api_key: str
     typhoon_llm_model: str
     supabase_url: str
@@ -72,21 +62,13 @@ def load_config(required: Iterable[str] = ALL_REQUIRED) -> Config:
     if missing:
         raise ConfigError(f"ยังไม่ได้ตั้งค่าใน .env: {', '.join(missing)}")
 
-    channel_raw = _env("DISCORD_CHANNEL_ID", "0")
-    try:
-        channel_id = int(channel_raw)
-    except ValueError:
-        raise ConfigError("DISCORD_CHANNEL_ID ต้องเป็นตัวเลข") from None
-
     categories = tuple(c.strip() for c in _env("CATEGORIES").split(",") if c.strip())
     if not categories:
         categories = DEFAULT_CATEGORIES
     if len(categories) > 25:
-        raise ConfigError("CATEGORIES มีได้ไม่เกิน 25 หมวด (ข้อจำกัดของ Discord select menu)")
+        raise ConfigError("CATEGORIES มีได้ไม่เกิน 25 หมวด")
 
     return Config(
-        discord_token=_env("DISCORD_TOKEN"),
-        discord_channel_id=channel_id,
         typhoon_api_key=_env("TYPHOON_API_KEY"),
         typhoon_llm_model=_env("TYPHOON_LLM_MODEL", ENV_DEFAULTS["TYPHOON_LLM_MODEL"]),
         supabase_url=_env("SUPABASE_URL").rstrip("/"),

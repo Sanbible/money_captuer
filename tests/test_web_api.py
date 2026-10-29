@@ -23,7 +23,7 @@ A = {"Authorization": "Bearer tok-a"}
 B = {"Authorization": "Bearer tok-b"}
 
 CFG = Config(
-    discord_token="", discord_channel_id=0, typhoon_api_key="typhoon-secret", typhoon_llm_model="m",
+    typhoon_api_key="typhoon-secret", typhoon_llm_model="m",
     supabase_url="https://proj.supabase.co", supabase_anon_key="sb_publishable_x",
     supabase_service_role_key="sb_secret_x", public_base_url="", categories=("อาหาร", "เดินทาง", "อื่นๆ"),
 )
