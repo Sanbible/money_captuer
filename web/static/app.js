@@ -103,5 +103,21 @@ const MC = (() => {
     return node;
   }
 
-  return { init, providers, session, requireSession, signOut, api, baht, displayName, el };
+  // ปลายทางหลัง login (เช่นลิงก์เชิญปาร์ตี้) — รับเฉพาะ path ภายในเว็บนี้ กัน redirect ไปเว็บอื่น
+  function safeNext(value) {
+    return typeof value === "string" && value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\")
+      ? value : null;
+  }
+
+  async function requireSessionOrLogin() {
+    const s = await session();
+    if (!s) {
+      location.replace(`/?next=${encodeURIComponent(location.pathname)}`);
+      throw new Error("ยังไม่ได้เข้าสู่ระบบ");
+    }
+    return s;
+  }
+
+  return { init, providers, session, requireSession, requireSessionOrLogin, signOut, api, baht, displayName, el,
+           safeNext };
 })();

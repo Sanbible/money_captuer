@@ -44,7 +44,8 @@
       $("message").textContent = text;
     };
 
-    MC.session().then((s) => { if (s) location.replace("/dashboard"); }).catch((e) => show("error", e.message));
+    const next = MC.safeNext(new URLSearchParams(location.search).get("next")) || "/dashboard";
+    MC.session().then((s) => { if (s) location.replace(next); }).catch((e) => show("error", e.message));
     MC.providers().then((p) => {
       $("login-google").classList.toggle("hidden", !p.google);
       $("email-form").classList.toggle("hidden", !p.email);
@@ -56,7 +57,7 @@
         const { supabase } = await MC.init();
         const { error } = await supabase.auth.signInWithOAuth({
           provider,
-          options: { redirectTo: `${location.origin}/dashboard` },
+          options: { redirectTo: `${location.origin}${next}` },
         });
         if (error) throw error;
       } catch (e) {
@@ -74,7 +75,7 @@
         const { supabase } = await MC.init();
         const { error } = await supabase.auth.signInWithOtp({
           email: $("email").value.trim(),
-          options: { emailRedirectTo: `${location.origin}/dashboard` },
+          options: { emailRedirectTo: `${location.origin}${next}` },
         });
         if (error) throw error;
         show("ok", "ส่งลิงก์แล้ว เปิดอีเมลแล้วกดลิงก์เพื่อเข้าสู่ระบบ");

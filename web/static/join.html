@@ -1,2 +1,44 @@
 <!doctype html>
-<html lang="th"><head><meta charset="utf-8"><title>Money Capture</title></head><body></body></html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>เข้าร่วมปาร์ตี้ · Money Capture</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="hero">
+    <div class="card">
+      <h1>เข้าร่วมปาร์ตี้</h1>
+      <div id="spinner" class="spinner" style="margin-top: 16px"></div>
+      <p id="message" class="muted">กำลังเข้าร่วม…</p>
+      <a id="back" class="btn btn-block hidden" href="/parties">ไปหน้าปาร์ตี้ของฉัน</a>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="/static/app.js"></script>
+  <script>
+    (async () => {
+      const $ = (id) => document.getElementById(id);
+      const code = decodeURIComponent(location.pathname.split("/").pop() || "");
+      try {
+        await MC.requireSessionOrLogin(); // ยังไม่ login → ไปหน้าแรกแล้วกลับมาที่ลิงก์นี้
+      } catch {
+        return;
+      }
+      try {
+        const res = await MC.api("/api/parties/join", { method: "POST", json: { code } });
+        location.replace(`/party/${res.id}`);
+      } catch (e) {
+        $("spinner").classList.add("hidden");
+        $("message").className = "notice notice-error";
+        $("message").textContent = e.message;
+        $("back").classList.remove("hidden");
+      }
+    })();
+  </script>
+</body>
+</html>

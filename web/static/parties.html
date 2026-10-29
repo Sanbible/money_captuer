@@ -1,2 +1,132 @@
 <!doctype html>
-<html lang="th"><head><meta charset="utf-8"><title>Money Capture</title></head><body></body></html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ปาร์ตี้ · Money Capture</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container">
+      <a class="brand" href="/dashboard">Money <span>Capture</span></a>
+      <span id="user" class="user"></span>
+      <a class="btn btn-small" href="/dashboard">รายจ่ายของฉัน</a>
+      <button id="logout" class="btn btn-small" type="button">ออกจากระบบ</button>
+    </div>
+  </header>
+
+  <main class="container stack">
+    <div>
+      <h1 style="font-size: 1.4rem">ปาร์ตี้หารค่าใช้จ่าย</h1>
+      <p class="muted">ไปเที่ยวหรือกินข้าวกับเพื่อน ใครจ่ายอะไรก็บันทึกไว้ แล้วระบบสรุปให้ว่าใครต้องโอนให้ใครเท่าไหร่</p>
+    </div>
+
+    <p id="page-error" class="notice notice-error hidden" role="alert"></p>
+
+    <section class="party-forms">
+      <form id="create-form" class="card">
+        <h2 class="card-title">สร้างปาร์ตี้ใหม่</h2>
+        <div class="field">
+          <label for="party-name">ชื่อปาร์ตี้</label>
+          <input id="party-name" maxlength="100" required placeholder="เช่น ทริปเขาใหญ่">
+        </div>
+        <button id="create-btn" class="btn btn-primary" type="submit">สร้างปาร์ตี้</button>
+      </form>
+      <form id="join-form" class="card">
+        <h2 class="card-title">เข้าร่วมด้วยโค้ด</h2>
+        <div class="field">
+          <label for="join-code">โค้ด 6 ตัวจากเพื่อน</label>
+          <input id="join-code" maxlength="20" required placeholder="เช่น K7QM4X" autocapitalize="characters"
+                 style="text-transform: uppercase; letter-spacing: .1em">
+        </div>
+        <button id="join-btn" class="btn" type="submit">เข้าร่วม</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">ปาร์ตี้ของฉัน</h2>
+      <div id="party-list" class="party-list"></div>
+      <p id="empty" class="empty hidden">ยังไม่มีปาร์ตี้ — สร้างใหม่ หรือขอโค้ดจากเพื่อน</p>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="/static/app.js"></script>
+  <script>
+    (async () => {
+      const $ = (id) => document.getElementById(id);
+      const { el } = MC;
+      const STATUS = { open: "เปิดอยู่", closed: "รอโอนเงิน", settled: "เคลียร์แล้ว" };
+      let session;
+      try {
+        session = await MC.requireSession();
+      } catch {
+        return;
+      }
+      $("user").textContent = MC.displayName(session.user);
+      $("logout").addEventListener("click", MC.signOut);
+
+      const pageError = (text) => {
+        $("page-error").textContent = text || "";
+        $("page-error").classList.toggle("hidden", !text);
+      };
+      const sb = (satang) => MC.baht(satang / 100);
+
+      function card(p) {
+        const net = p.my_net_satang;
+        const netText = net > 0 ? `ได้คืน ${sb(net)}` : net < 0 ? `ต้องจ่าย ${sb(-net)}` : "ไม่มียอดค้าง";
+        return el(
+          "a",
+          { className: "party-card", href: `/party/${p.id}` },
+          el("div", { className: "party-card-head" },
+             el("strong", { textContent: p.name }),
+             el("span", { className: `badge badge-${p.status}`, textContent: STATUS[p.status] || p.status })),
+          el("div", { className: "muted", textContent: `สมาชิก ${p.member_count}/10 · รวม ${sb(p.total_satang)}${p.is_host ? " · คุณเป็น host" : ""}` }),
+          el("div", { className: net < 0 ? "net-neg" : net > 0 ? "net-pos" : "muted", textContent: netText }),
+        );
+      }
+
+      async function load() {
+        try {
+          const items = await MC.api("/api/parties");
+          $("party-list").replaceChildren(...items.map(card));
+          $("empty").classList.toggle("hidden", items.length > 0);
+        } catch (e) {
+          pageError(`โหลดปาร์ตี้ไม่สำเร็จ: ${e.message}`);
+        }
+      }
+
+      $("create-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        $("create-btn").disabled = true;
+        pageError("");
+        try {
+          const party = await MC.api("/api/parties", { method: "POST", json: { name: $("party-name").value.trim() } });
+          location.href = `/party/${party.id}`;
+        } catch (e) {
+          $("create-btn").disabled = false;
+          pageError(`สร้างปาร์ตี้ไม่สำเร็จ: ${e.message}`);
+        }
+      });
+
+      $("join-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        $("join-btn").disabled = true;
+        pageError("");
+        try {
+          const res = await MC.api("/api/parties/join", { method: "POST", json: { code: $("join-code").value.trim() } });
+          location.href = `/party/${res.id}`;
+        } catch (e) {
+          $("join-btn").disabled = false;
+          pageError(e.message);
+        }
+      });
+
+      load();
+    })();
+  </script>
+</body>
+</html>
