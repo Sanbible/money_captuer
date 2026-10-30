@@ -76,7 +76,8 @@ def create_app(
     # ---------- pages ----------
 
     for path, page in (("/", "index.html"), ("/dashboard", "dashboard.html"), ("/settings", "settings.html"),
-                       ("/parties", "parties.html"), ("/party/{party_id}", "party.html"), ("/join/{code}", "join.html")):
+                       ("/parties", "parties.html"), ("/party/{party_id}", "party.html"), ("/join/{code}", "join.html"),
+                       ("/privacy", "privacy.html"), ("/terms", "terms.html")):
         app.add_api_route(path, _page(page), methods=["GET"], include_in_schema=False)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f2ee">
+  <title>นโยบายความเป็นส่วนตัว · Money Capture</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="app stack">
+    <a class="brand" href="/">Money Capture</a>
+    <h1 class="headline" style="font-size: 1.6rem">นโยบายความเป็นส่วนตัว</h1>
+    <p class="muted small">ปรับปรุงล่าสุด 30 ตุลาคม 2569 (2026)</p>
+
+    <section class="card stack-sm">
+      <h2 style="font-size: 1.05rem">ข้อมูลที่เราเก็บ</h2>
+      <ul class="stack-sm" style="padding-left: 20px">
+        <li>จากการเข้าสู่ระบบ (Discord, Google หรืออีเมล): อีเมล ชื่อที่แสดง และรหัสบัญชีของผู้ให้บริการ login</li>
+        <li>รายการค่าใช้จ่ายที่คุณบันทึก: ยอดเงิน วันที่ เวลา ผู้รับ หมวด หมายเหตุ ธนาคาร และเลขอ้างอิงของสลิป</li>
+        <li>ข้อมูลปาร์ตี้: ชื่อปาร์ตี้ สมาชิก (ชื่อที่แสดง) รายการที่หารกัน รายการโอน และค่าตรวจสอบสลิป
+          (เลขอ้างอิงและค่า hash ของรูป) เพื่อกันสลิปซ้ำ</li>
+      </ul>
+    </section>
+
+    <section class="card stack-sm">
+      <h2 style="font-size: 1.05rem">รูปสลิป</h2>
+      <p>รูปสลิปที่อัปโหลดถูกส่งไปยังบริการอ่านข้อความภายนอก คือ Gemini API (Google) และ/หรือ Typhoon API
+        เพื่ออ่านยอดเงิน วันที่ และผู้รับ — เว็บนี้<strong>ไม่เก็บไฟล์รูป</strong> เก็บเฉพาะข้อมูลที่อ่านได้และคุณยืนยันแล้ว</p>
+      <p class="muted small">เว็บนี้ใช้ Gemini API แบบไม่เสียค่าใช้จ่าย ซึ่ง Google อาจนำข้อมูลที่ส่งไปใช้ปรับปรุงผลิตภัณฑ์ของ Google
+        — หากไม่ต้องการ โปรดกรอกยอดเองแทนการอัปโหลดรูป</p>
+    </section>
+
+    <section class="card stack-sm">
+      <h2 style="font-size: 1.05rem">ใครเห็นข้อมูลของคุณ</h2>
+      <ul class="stack-sm" style="padding-left: 20px">
+        <li>รายจ่ายส่วนตัว: เห็นเฉพาะคุณ</li>
+        <li>ปาร์ตี้: สมาชิกในปาร์ตี้เดียวกันเห็นชื่อที่แสดงและทุกรายการในปาร์ตี้นั้น</li>
+        <li>ข้อมูลเก็บใน Supabase (ฐานข้อมูล) และเว็บรันบน Render — เราไม่ขาย ไม่ให้เช่า และไม่ใช้ข้อมูลเพื่อโฆษณา</li>
+        <li>สถานะการเข้าสู่ระบบเก็บไว้ในเบราว์เซอร์ของคุณ (local storage) ไม่มีคุกกี้โฆษณาหรือตัวติดตาม</li>
+      </ul>
+    </section>
+
+    <section class="card stack-sm">
+      <h2 style="font-size: 1.05rem">การลบข้อมูล</h2>
+      <p>ลบรายการค่าใช้จ่ายของคุณได้เองในหน้ารายจ่าย หากต้องการลบบัญชีและข้อมูลทั้งหมด แจ้งได้ที่
+        <a href="https://github.com/Sanbible/money_capture/issues">GitHub ของโปรเจกต์</a></p>
+    </section>
+
+    <p class="fine-print"><a href="/terms">ข้อตกลงการใช้งาน</a> · <a href="/">กลับหน้าแรก</a></p>
+  </main>
+</body>
+</html>

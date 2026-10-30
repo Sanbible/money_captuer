@@ -599,6 +599,25 @@ def test_party_pages_served(client, path):
     assert resp.status_code == 200 and resp.headers["content-type"].startswith("text/html")
 
 
+# ---------- นโยบายความเป็นส่วนตัว / ข้อตกลง (Google OAuth ต้องมีลิงก์สาธารณะ ไม่ต้อง login) ----------
+
+@pytest.mark.parametrize("path, needles", [
+    ("/privacy", ["Gemini", "Typhoon", "Supabase", "ไม่เก็บไฟล์รูป", "ลบ"]),
+    ("/terms", ["Money Capture", "ไม่รับประกัน"]),
+])
+def test_policy_pages_public(client, path, needles):
+    resp = client.get(path)
+    assert resp.status_code == 200 and resp.headers["content-type"].startswith("text/html")
+    for needle in needles:
+        assert needle in resp.text, needle
+
+
+def test_login_page_links_policies(client):
+    html = client.get("/").text
+    assert 'href="/privacy"' in html and 'href="/terms"' in html
+    assert "บอท Discord" not in html  # เอาบอทออกไปแล้ว
+
+
 # ---------- หน้าเว็บ/JS ต้องไม่ถูก browser ใช้ของเก่าจาก cache (หน้าปาร์ตี้ว่างเพราะ app.js เวอร์ชันเก่า) ----------
 
 @pytest.mark.parametrize("path", ["/static/app.js", "/static/party.js", "/static/style.css", "/party/x", "/dashboard"])
