@@ -192,8 +192,12 @@ label, .label-like { display: block; font-size: .82rem; font-weight: 500; color:
 /* minmax(0, …) + min-width: 0 — iOS Safari ให้ input date/time มีความกว้างขั้นต่ำในตัว ถ้าไม่บีบ แถวจะล้นจอแล้ว sheet เลื่อนข้าง */
 .row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .row > * { min-width: 0; }
-input[type="date"], input[type="time"] { -webkit-appearance: none; appearance: none; min-width: 0; display: block; text-align: left; }
-input::-webkit-date-and-time-value { text-align: left; }
+/* appearance: none ทำให้ iOS วางค่าไว้ชิดบน — กำหนด line-height เต็มกล่อง (52 - ขอบ 2) ให้อยู่กึ่งกลาง */
+input[type="date"], input[type="time"] {
+  -webkit-appearance: none; appearance: none; min-width: 0; display: block; text-align: left;
+  height: 52px; line-height: 50px;
+}
+input::-webkit-date-and-time-value { text-align: left; margin: 0; line-height: 50px; }
 .form { display: flex; flex-direction: column; gap: 16px; }
 fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 legend { padding: 0; }
