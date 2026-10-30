@@ -235,11 +235,11 @@ legend { padding: 0; }
 
 /* chip เลือกได้ (หมวด / คนจ่าย) */
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.chip-choice { position: relative; margin: 0; color: var(--text); font-size: .9rem; font-weight: 500; cursor: pointer; }
+.chip-choice { position: relative; max-width: 100%; margin: 0; color: var(--text); font-size: .9rem; font-weight: 500; cursor: pointer; }
 .chip-choice input { position: absolute; opacity: 0; width: 1px; height: 1px; min-height: 0; }
 .chip-choice > span {
-  display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 14px;
-  border-radius: 999px; border: 1px solid var(--line); background: var(--surface);
+  display: inline-flex; align-items: center; gap: 6px; min-height: 40px; max-width: 100%; padding: 6px 14px;
+  border-radius: 999px; border: 1px solid var(--line); background: var(--surface); overflow-wrap: anywhere;
 }
 .chip-choice.with-avatar > span { padding-left: 4px; }
 .chip-choice input:checked + span { background: var(--dark); border-color: var(--dark); color: var(--on-dark); font-weight: 600; }
@@ -257,7 +257,7 @@ legend { padding: 0; }
   border-color: var(--brand-strong);
   background: var(--brand-strong) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / 14px no-repeat;
 }
-.check-row .name { flex: 1; min-width: 0; font-weight: 600; }
+.check-row .name { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
 .check-row .share { font-weight: 600; font-size: .9rem; }
 .check-row input:not(:checked) ~ .name, .check-row input:not(:checked) ~ .share { color: var(--muted); }
 
@@ -313,7 +313,7 @@ legend { padding: 0; }
 .list > li + li { border-top: 1px solid var(--line); }
 .list .main { flex: 1; min-width: 0; }
 .list .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.list .sub { font-size: .8rem; color: var(--muted); }
+.list .sub { font-size: .8rem; color: var(--muted); overflow-wrap: anywhere; }
 .list .end { text-align: right; flex: none; }
 .list .amount { font-weight: 700; white-space: nowrap; }
 .list .title-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -493,10 +493,11 @@ label.btn.btn-primary { color: #fff; }
 .transfer-top { display: flex; align-items: center; gap: 10px; }
 .transfer-top .arrow { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--surface-2); color: var(--muted); }
 .transfer-top .who { flex: 1; min-width: 0; }
-.transfer-top .who strong { display: block; font-size: .95rem; }
-.transfer-top .amount { font-size: 1.1rem; font-weight: 700; white-space: nowrap; }
+/* ชื่อที่ไม่มีช่องว่าง (เช่นอีเมล) ต้องตัดบรรทัดได้ ไม่งั้นล้นไปทับยอดเงิน */
+.transfer-top .who strong { display: block; font-size: .95rem; overflow-wrap: anywhere; }
+.transfer-top .amount { flex: none; font-size: 1.1rem; font-weight: 700; white-space: nowrap; }
 .transfer-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .transfer-actions .btn:only-child, .transfer-actions .btn-block { flex: 1 0 100%; }
-.waiting { display: flex; align-items: center; gap: 6px; font-size: .82rem; color: var(--muted); }
+.waiting { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: .82rem; color: var(--muted); overflow-wrap: anywhere; }
 
 .share-note { font-size: .8rem; color: var(--muted); }
