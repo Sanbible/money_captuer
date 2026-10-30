@@ -1,4 +1,4 @@
-// หน้า dashboard: เลือกเดือน → ยอดรวม/กราฟ/ตาราง ; อัปโหลดสลิป → ตรวจ/แก้ → บันทึก
+// หน้า dashboard: เลือกเดือน → ยอดรวม/กราฟ/รายการ ; อัปโหลดสลิป → ตรวจ/แก้ → บันทึก
 (async () => {
   const $ = (id) => document.getElementById(id);
   const { el, baht } = MC;
@@ -21,9 +21,14 @@
     const [y, m, d] = iso.split("-").map(Number);
     return new Date(y, m - 1, d).toLocaleDateString("th-TH", { day: "numeric", month: "short" });
   };
+  const monthLabel = (month) => {
+    const [y, m] = month.split("-").map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString("th-TH", { month: "short", year: "numeric" });
+  };
 
-  $("user").textContent = MC.displayName(session.user);
-  $("logout").addEventListener("click", MC.signOut);
+  const name = MC.displayName(session.user);
+  $("user").textContent = name;
+  $("avatar").textContent = MC.initial(name);
   $("month").value = today().slice(0, 7);
   $("month").addEventListener("change", load);
 
@@ -48,6 +53,7 @@
       renderRows(rows);
       $("total").textContent = baht(summary.total);
       $("count").textContent = rows.length.toLocaleString("th-TH");
+      $("month-label").textContent = monthLabel(month);
       MCCharts.render(summary);
     } catch (e) {
       if (seq === loadSeq) pageError(`โหลดข้อมูลไม่สำเร็จ: ${e.message}`);
@@ -55,28 +61,35 @@
   }
 
   function renderRows(rows) {
-    const body = $("rows");
-    body.replaceChildren(
+    $("rows").replaceChildren(
       ...rows.map((r) => {
-        const remove = el("button", { className: "btn btn-link", type: "button", textContent: "ลบ" });
+        const remove = el("button", { className: "icon-btn mini danger", type: "button", ariaLabel: "ลบรายการ" },
+          MC.icon("trash", 18));
         remove.addEventListener("click", () => removeExpense(r, remove));
-        return el(
-          "tr",
-          {},
-          el("td", {}, shortDate(r.date), r.time ? el("div", { className: "muted", textContent: r.time }) : null),
-          el("td", {}, r.receiver || "–", r.note ? el("div", { className: "muted", textContent: r.note }) : null),
-          el("td", {}, el("span", { className: "tag", textContent: r.category })),
-          el("td", { className: "num", textContent: baht(r.amount) }),
-          el("td", { className: "muted", textContent: r.source === "discord" ? "Discord" : "เว็บ" }),
-          el("td", {}, remove),
-        );
+        const source = r.source === "discord" ? "Discord" : "เว็บ";
+        return el("li", {},
+          el("span", { className: "tile" }, MC.icon(MC.categoryIcon(r.category), 22)),
+          el("div", { className: "main" },
+            el("div", { className: "title", textContent: r.receiver || r.note || r.category }),
+            el("div", { className: "sub", textContent: [r.category, source, r.receiver && r.note].filter(Boolean).join(" · ") })),
+          el("div", { className: "end" },
+            el("div", { className: "amount", textContent: baht(r.amount) }),
+            el("div", { className: "sub", textContent: [shortDate(r.date), r.time].filter(Boolean).join(" ") })),
+          remove);
       }),
     );
+    $("rows").classList.toggle("hidden", rows.length === 0);
     $("empty").classList.toggle("hidden", rows.length > 0);
+    $("list-meta").textContent = rows.length ? `${rows.length.toLocaleString("th-TH")} รายการ · ล่าสุดก่อน` : "";
   }
 
   async function removeExpense(row, button) {
-    if (!confirm(`ลบรายการ ${baht(row.amount)} ${row.receiver || ""} ?`)) return;
+    const ok = await MC.confirm({
+      title: "ลบรายการนี้?",
+      body: `${baht(row.amount)} ${row.receiver || row.category} — ลบแล้วกู้คืนไม่ได้`,
+      ok: "ลบรายการ", danger: true, iconName: "trash",
+    });
+    if (!ok) return;
     button.disabled = true;
     try {
       await MC.api(`/api/expenses/${row.id}`, { method: "DELETE" });
@@ -93,9 +106,11 @@
   let slipMeta = { bank: "", trans_ref: null }; // ค่าจาก QR ที่ไม่ได้ให้แก้ในฟอร์ม
 
   $("f-category").replaceChildren(
-    el("option", { value: "", textContent: "เลือกหมวด", disabled: true, selected: true }),
-    ...config.categories.map((c) => el("option", { value: c, textContent: c })),
+    ...config.categories.map((c) => el("label", { className: "chip-choice" },
+      el("input", { type: "radio", name: "category", value: c, required: true }),
+      el("span", {}, MC.icon(MC.categoryIcon(c), 16), c))),
   );
+  const categoryInputs = () => [...$("f-category").querySelectorAll("input")];
 
   function showStep(name) {
     for (const step of ["pick", "reading", "form"]) $(`step-${step}`).classList.toggle("hidden", step !== name);
@@ -114,7 +129,7 @@
     $("f-time").value = draft.time || "";
     $("f-receiver").value = draft.receiver || "";
     $("f-note").value = "";
-    $("f-category").selectedIndex = 0;
+    for (const input of categoryInputs()) input.checked = false;
     $("save-error").classList.add("hidden");
     $("save").disabled = false;
     slipMeta = { bank: draft.bank || "", trans_ref: draft.trans_ref || null };
@@ -122,13 +137,17 @@
 
   function openDialog() {
     $("slip-file").value = "";
-    $("preview").classList.add("hidden");
+    $("slip-attached").classList.add("hidden");
     notice("ok", "");
     showStep("pick");
     dialog.showModal();
   }
 
   $("open-upload").addEventListener("click", openDialog);
+  $("fab-upload").addEventListener("click", (event) => {
+    event.preventDefault(); // อยู่หน้านี้อยู่แล้ว เปิด sheet เลย
+    openDialog();
+  });
   $("close-upload").addEventListener("click", () => dialog.close());
   $("cancel-upload").addEventListener("click", () => dialog.close());
 
@@ -150,8 +169,10 @@
       notice("error", "ไฟล์ใหญ่เกิน 10 MB");
       return showStep("form");
     }
-    $("preview").src = URL.createObjectURL(file);
-    $("preview").classList.remove("hidden");
+    const url = URL.createObjectURL(file);
+    $("preview").src = url;
+    $("reading-preview").src = url;
+    $("slip-attached").classList.remove("hidden");
     showStep("reading");
 
     const form = new FormData();
@@ -165,13 +186,13 @@
       } else if (draft.amount == null) {
         notice("warn", "อ่านยอดเงินจากสลิปไม่ได้ กรุณากรอกจำนวนเงินเอง");
       } else {
-        notice("ok", "อ่านสลิปแล้ว ตรวจข้อมูลแล้วเลือกหมวดเพื่อบันทึก");
+        notice("ok", "อ่านสลิปแล้ว — ตรวจยอดและเลือกหมวดก่อนบันทึก");
       }
     } catch (e) {
       notice("error", `อ่านสลิปไม่สำเร็จ (${e.message}) — กรอกข้อมูลเองได้`);
     }
     showStep("form");
-    $($("f-amount").value ? "f-category" : "f-amount").focus();
+    ($("f-amount").value ? categoryInputs()[0] : $("f-amount"))?.focus();
   });
 
   $("step-form").addEventListener("submit", async (event) => {
@@ -181,7 +202,7 @@
     $("save-error").classList.add("hidden");
     const body = {
       amount: Number($("f-amount").value),
-      category: $("f-category").value,
+      category: $("f-category").querySelector("input:checked")?.value || "",
       date: $("f-date").value || null,
       time: $("f-time").value || null,
       receiver: $("f-receiver").value.trim(),
@@ -200,6 +221,12 @@
       save.disabled = e.status === 409; // ซ้ำ → ไม่ให้กดซ้ำ
     }
   });
+
+  // มาจากปุ่มสแกนใน tab bar ของหน้าอื่น (/dashboard?upload=1)
+  if (new URLSearchParams(location.search).has("upload")) {
+    history.replaceState(null, "", location.pathname);
+    openDialog();
+  }
 
   load();
 })();

@@ -2,52 +2,62 @@
 <html lang="th">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f2ee">
   <title>ตั้งค่า · Money Capture</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="container">
-      <a class="brand" href="/dashboard">Money <span>Capture</span></a>
-      <a class="btn btn-small" href="/parties">ปาร์ตี้</a>
-      <a class="btn btn-small" href="/dashboard">กลับไปหน้ารายจ่าย</a>
-    </div>
-  </header>
+  <main class="app has-tabbar">
+    <h1 class="page-title">บัญชีของฉัน</h1>
 
-  <main class="container stack">
-    <section class="card stack">
-      <h1 style="font-size: 1.3rem">บัญชีของฉัน</h1>
+    <section class="card stack" style="align-items: center; text-align: center">
+      <span id="avatar" class="avatar xl tone-dark" aria-hidden="true"></span>
       <div>
-        <div class="muted">ชื่อ / อีเมล</div>
-        <div id="name">–</div>
-      </div>
-      <div>
-        <div class="muted">วิธีเข้าสู่ระบบที่ผูกไว้</div>
-        <ul id="providers" style="margin: 4px 0 0; padding-left: 20px"></ul>
-      </div>
-      <p id="message" class="notice hidden" role="status"></p>
-      <div>
-        <button id="logout" class="btn" type="button">ออกจากระบบ</button>
+        <div id="name" style="font-size: 1.25rem; font-weight: 700">–</div>
+        <div id="email" class="muted small"></div>
       </div>
     </section>
+
+    <section class="card" style="padding-bottom: 8px">
+      <h2 style="font-size: 1rem">วิธีเข้าสู่ระบบที่ผูกไว้</h2>
+      <ul id="providers" class="list" style="padding: 4px 0 0"></ul>
+    </section>
+
+    <p id="message" class="notice hidden" role="status"></p>
 
     <section id="link-section" class="card stack hidden">
-      <h2 style="font-size: 1.1rem">เชื่อมบัญชี Discord</h2>
-      <p class="muted">เชื่อมแล้ว สลิปที่ส่งผ่านบอท Discord จะขึ้นในบัญชีนี้อัตโนมัติ (รวมถึงสลิปที่เคยส่งไว้ก่อนหน้า)</p>
-      <div>
-        <button id="link-discord" class="btn btn-discord" type="button">เชื่อมบัญชี Discord</button>
+      <div style="display: flex; gap: 14px; align-items: flex-start">
+        <span class="tile" style="background: var(--discord); color: #fff">
+          <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.865-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.126-.094.252-.192.372-.291a.074.074 0 0 1 .078-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.099.246.198.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+        </span>
+        <div>
+          <h2 style="font-size: 1rem">เชื่อมบัญชี Discord</h2>
+          <p class="muted small">เชื่อมแล้ว สลิปที่ส่งผ่านบอท Discord จะขึ้นในบัญชีนี้อัตโนมัติ (รวมถึงสลิปที่เคยส่งไว้ก่อนหน้า)</p>
+        </div>
       </div>
+      <button id="link-discord" class="btn btn-discord btn-block" type="button">เชื่อมบัญชี Discord</button>
     </section>
+
+    <p class="notice">รูปสลิปถูกส่งไปอ่านด้วย Typhoon OCR (บริการภายนอก) · ระบบไม่เก็บไฟล์รูป</p>
+    <button id="logout" class="btn btn-secondary btn-block btn-text-danger" type="button"><i data-icon="logout"></i>ออกจากระบบ</button>
   </main>
+
+  <nav class="tabbar" aria-label="เมนูหลัก">
+    <a class="tab" href="/dashboard" aria-label="รายจ่าย"><i data-icon="home" data-size="22"></i><span>รายจ่าย</span></a>
+    <a class="tab" href="/parties" aria-label="ปาร์ตี้"><i data-icon="users" data-size="22"></i><span>ปาร์ตี้</span></a>
+    <a class="tab-fab" href="/dashboard?upload=1" aria-label="อัปโหลดสลิป"><i data-icon="scan" data-size="24"></i></a>
+    <a class="tab" href="/settings" aria-current="page"><i data-icon="user" data-size="22"></i><span>บัญชี</span></a>
+  </nav>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
   <script src="/static/app.js"></script>
   <script>
     (async () => {
       const PROVIDER_NAMES = { discord: "Discord", google: "Google", email: "อีเมล" };
+      const PROVIDER_ICONS = { email: "mail" };
       let session;
       try {
         session = await MC.requireSession();
@@ -65,9 +75,16 @@
       const { data } = await supabase.auth.getUser();
       const user = data.user || session.user;
       const identities = user.identities || [];
-      $("name").textContent = MC.displayName(user);
+      const name = MC.displayName(user);
+      $("name").textContent = name;
+      $("avatar").textContent = MC.initial(name);
+      $("email").textContent = user.email && user.email !== name ? user.email : "";
       $("providers").replaceChildren(
-        ...identities.map((i) => MC.el("li", { textContent: PROVIDER_NAMES[i.provider] || i.provider })),
+        ...identities.map((i) => MC.el("li", {},
+          MC.el("span", { className: "tile", style: "width: 40px; height: 40px; border-radius: 12px" },
+                MC.icon(PROVIDER_ICONS[i.provider] || "user", 20)),
+          MC.el("div", { className: "main title", textContent: PROVIDER_NAMES[i.provider] || i.provider }),
+          MC.el("span", { className: "badge badge-ok", textContent: "ผูกแล้ว" }))),
       );
       $("logout").addEventListener("click", MC.signOut);
 

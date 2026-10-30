@@ -2,20 +2,24 @@
 <html lang="th">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f2ee">
   <title>เข้าร่วมปาร์ตี้ · Money Capture</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <main class="hero">
-    <div class="card">
-      <h1>เข้าร่วมปาร์ตี้</h1>
-      <div id="spinner" class="spinner" style="margin-top: 16px"></div>
+  <main class="app app-center">
+    <section class="card stack" style="align-items: center; text-align: center; padding: 28px">
+      <span id="join-icon" class="tile big round coral"><i data-icon="users" data-size="32"></i></span>
+      <h1 style="font-size: 1.5rem">เข้าร่วมปาร์ตี้</h1>
+      <span class="chip" style="background: var(--bg)"><span class="muted">โค้ด</span><strong id="code"></strong></span>
+      <div id="spinner" class="spinner"></div>
       <p id="message" class="muted">กำลังเข้าร่วม…</p>
-      <a id="back" class="btn btn-block hidden" href="/parties">ไปหน้าปาร์ตี้ของฉัน</a>
-    </div>
+      <a id="back" class="btn btn-dark btn-block hidden" href="/parties"><i data-icon="users"></i>ไปหน้าปาร์ตี้ของฉัน</a>
+    </section>
+    <p class="notice">ยังไม่ได้เข้าสู่ระบบ? ระบบจะพาไปหน้าเข้าสู่ระบบก่อน แล้วกลับมาที่ลิงก์นี้ให้อัตโนมัติ</p>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
@@ -24,6 +28,7 @@
     (async () => {
       const $ = (id) => document.getElementById(id);
       const code = decodeURIComponent(location.pathname.split("/").pop() || "");
+      $("code").textContent = code.toUpperCase();
       try {
         await MC.requireSessionOrLogin(); // ยังไม่ login → ไปหน้าแรกแล้วกลับมาที่ลิงก์นี้
       } catch (e) {
@@ -41,6 +46,7 @@
         $("spinner").classList.add("hidden");
         $("message").className = "notice notice-error";
         $("message").textContent = e.message;
+        $("join-icon").className = "tile big round danger";
         $("back").classList.remove("hidden");
       }
     })();

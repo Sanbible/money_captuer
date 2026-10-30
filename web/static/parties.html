@@ -2,56 +2,60 @@
 <html lang="th">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f2ee">
   <title>ปาร์ตี้ · Money Capture</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="container">
-      <a class="brand" href="/dashboard">Money <span>Capture</span></a>
-      <span id="user" class="user"></span>
-      <a class="btn btn-small" href="/dashboard">รายจ่ายของฉัน</a>
-      <button id="logout" class="btn btn-small" type="button">ออกจากระบบ</button>
-    </div>
-  </header>
-
-  <main class="container stack">
-    <div>
-      <h1 style="font-size: 1.4rem">ปาร์ตี้หารค่าใช้จ่าย</h1>
-      <p class="muted">ไปเที่ยวหรือกินข้าวกับเพื่อน ใครจ่ายอะไรก็บันทึกไว้ แล้วระบบสรุปให้ว่าใครต้องโอนให้ใครเท่าไหร่</p>
+  <main class="app has-tabbar">
+    <div class="stack-sm" style="gap: 6px">
+      <h1 class="page-title">ปาร์ตี้หารค่าใช้จ่าย</h1>
+      <p class="muted small">ไปเที่ยวหรือกินข้าวกับเพื่อน ใครจ่ายอะไรก็บันทึกไว้ แล้วระบบสรุปให้ว่าใครต้องโอนให้ใครเท่าไหร่</p>
     </div>
 
     <p id="page-error" class="notice notice-error hidden" role="alert"></p>
 
-    <section class="party-forms">
-      <form id="create-form" class="card">
-        <h2 class="card-title">สร้างปาร์ตี้ใหม่</h2>
-        <div class="field">
-          <label for="party-name">ชื่อปาร์ตี้</label>
-          <input id="party-name" maxlength="100" required placeholder="เช่น ทริปเขาใหญ่">
-        </div>
-        <button id="create-btn" class="btn btn-primary" type="submit">สร้างปาร์ตี้</button>
-      </form>
-      <form id="join-form" class="card">
-        <h2 class="card-title">เข้าร่วมด้วยโค้ด</h2>
-        <div class="field">
-          <label for="join-code">โค้ด 6 ตัวจากเพื่อน</label>
-          <input id="join-code" maxlength="20" required placeholder="เช่น K7QM4X" autocapitalize="characters"
-                 style="text-transform: uppercase; letter-spacing: .1em">
-        </div>
-        <button id="join-btn" class="btn" type="submit">เข้าร่วม</button>
-      </form>
-    </section>
+    <form id="create-form" class="card stack">
+      <h2 class="card-title-row"><span class="tile coral" style="width: 32px; height: 32px; border-radius: 12px"><i data-icon="plus" data-size="18"></i></span>สร้างปาร์ตี้ใหม่</h2>
+      <div class="field">
+        <label for="party-name">ชื่อปาร์ตี้</label>
+        <input id="party-name" maxlength="100" required placeholder="เช่น ทริปเขาใหญ่">
+      </div>
+      <button id="create-btn" class="btn btn-primary btn-block" type="submit"><i data-icon="arrow-right"></i>สร้างปาร์ตี้</button>
+    </form>
 
-    <section class="card">
-      <h2 class="card-title">ปาร์ตี้ของฉัน</h2>
-      <div id="party-list" class="party-list"></div>
-      <p id="empty" class="empty hidden">ยังไม่มีปาร์ตี้ — สร้างใหม่ หรือขอโค้ดจากเพื่อน</p>
-    </section>
+    <form id="join-form" class="card stack">
+      <h2 class="card-title-row"><span class="tile" style="width: 32px; height: 32px; border-radius: 12px"><i data-icon="hash" data-size="18"></i></span>เข้าร่วมด้วยโค้ด</h2>
+      <div class="field">
+        <label for="join-code">โค้ด 6 ตัวจากเพื่อน หรือเปิดลิงก์เชิญที่เพื่อนส่งมา</label>
+        <div class="join-row">
+          <input id="join-code" class="code-input" maxlength="20" required placeholder="K7QM4X" autocapitalize="characters" autocomplete="off">
+          <button id="join-btn" class="icon-btn dark" type="submit" aria-label="เข้าร่วม"><i data-icon="arrow-right"></i></button>
+        </div>
+      </div>
+    </form>
+
+    <div class="section-head">
+      <h2>ปาร์ตี้ของฉัน</h2>
+      <span id="party-count" class="muted small"></span>
+    </div>
+    <div id="party-list" class="stack-sm"></div>
+    <div id="empty" class="card empty-state hidden">
+      <span class="tile round big"><i data-icon="users" data-size="28"></i></span>
+      <strong>ยังไม่มีปาร์ตี้</strong>
+      <span class="muted small">สร้างใหม่ หรือขอโค้ดจากเพื่อน</span>
+    </div>
   </main>
+
+  <nav class="tabbar" aria-label="เมนูหลัก">
+    <a class="tab" href="/dashboard" aria-label="รายจ่าย"><i data-icon="home" data-size="22"></i><span>รายจ่าย</span></a>
+    <a class="tab" href="/parties" aria-current="page"><i data-icon="users" data-size="22"></i><span>ปาร์ตี้</span></a>
+    <a class="tab-fab" href="/dashboard?upload=1" aria-label="อัปโหลดสลิป"><i data-icon="scan" data-size="24"></i></a>
+    <a class="tab" href="/settings" aria-label="บัญชี"><i data-icon="user" data-size="22"></i><span>บัญชี</span></a>
+  </nav>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
   <script src="/static/app.js"></script>
@@ -60,14 +64,11 @@
       const $ = (id) => document.getElementById(id);
       const { el } = MC;
       const STATUS = { open: "เปิดอยู่", closed: "รอโอนเงิน", settled: "เคลียร์แล้ว" };
-      let session;
       try {
-        session = await MC.requireSession();
+        await MC.requireSession();
       } catch {
         return;
       }
-      $("user").textContent = MC.displayName(session.user);
-      $("logout").addEventListener("click", MC.signOut);
 
       const pageError = (text) => {
         $("page-error").textContent = text || "";
@@ -77,15 +78,19 @@
 
       function card(p) {
         const net = p.my_net_satang;
-        const netText = net > 0 ? `ได้คืน ${sb(net)}` : net < 0 ? `ต้องจ่าย ${sb(-net)}` : "ไม่มียอดค้าง";
+        const [netClass, netIcon, netText] = net > 0 ? ["pos", "arrow-down-left", `ได้คืน ${sb(net)}`]
+          : net < 0 ? ["neg", "arrow-up-right", `ต้องจ่าย ${sb(-net)}`] : ["", "check", "ไม่มียอดค้าง"];
         return el(
           "a",
-          { className: "party-card", href: `/party/${p.id}` },
+          { className: "card party-card", href: `/party/${p.id}` },
           el("div", { className: "party-card-head" },
              el("strong", { textContent: p.name }),
              el("span", { className: `badge badge-${p.status}`, textContent: STATUS[p.status] || p.status })),
-          el("div", { className: "muted", textContent: `สมาชิก ${p.member_count}/10 · รวม ${sb(p.total_satang)}${p.is_host ? " · คุณเป็น host" : ""}` }),
-          el("div", { className: net < 0 ? "net-neg" : net > 0 ? "net-pos" : "muted", textContent: netText }),
+          el("div", { className: "muted small",
+                      textContent: `สมาชิก ${p.member_count}/10 · รวม ${sb(p.total_satang)}${p.is_host ? " · คุณเป็น host" : ""}` }),
+          el("div", { className: "party-card-foot" },
+             el("span", { className: `net-pill ${netClass}` }, MC.icon(netIcon, 14), netText),
+             MC.icon("chevron-right", 18)),
         );
       }
 
@@ -93,6 +98,7 @@
         try {
           const items = await MC.api("/api/parties");
           $("party-list").replaceChildren(...items.map(card));
+          $("party-count").textContent = items.length ? `${items.length} ปาร์ตี้` : "";
           $("empty").classList.toggle("hidden", items.length > 0);
         } catch (e) {
           pageError(`โหลดปาร์ตี้ไม่สำเร็จ: ${e.message}`);

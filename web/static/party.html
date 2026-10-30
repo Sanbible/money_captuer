@@ -2,108 +2,138 @@
 <html lang="th">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f2ee">
   <title>ปาร์ตี้ · Money Capture</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="container">
-      <a class="brand" href="/dashboard">Money <span>Capture</span></a>
-      <a class="btn btn-small" href="/parties">← ปาร์ตี้ของฉัน</a>
-      <button id="refresh" class="btn btn-small" type="button">รีเฟรช</button>
-    </div>
-  </header>
+  <main class="app">
+    <header class="topbar">
+      <a class="icon-btn" href="/parties" aria-label="กลับไปปาร์ตี้ของฉัน"><i data-icon="chevron-left"></i></a>
+      <div id="top-title" class="top-title">ปาร์ตี้</div>
+      <button id="refresh" class="icon-btn" type="button" aria-label="รีเฟรช"><i data-icon="refresh"></i></button>
+    </header>
 
-  <main class="container stack">
     <p id="page-error" class="notice notice-error hidden" role="alert"></p>
 
-    <section id="head" class="card stack hidden">
-      <div class="party-card-head">
-        <h1 id="party-name" style="font-size: 1.4rem"></h1>
+    <section id="head" class="hero hidden">
+      <div class="hero-badges">
         <span id="party-status" class="badge"></span>
+        <span id="host-chip" class="chip hidden"><i data-icon="crown" data-size="13"></i>คุณเป็น host</span>
       </div>
-      <div class="toolbar">
+      <h1 id="party-name" class="hero-title"></h1>
+      <p id="party-meta" class="hero-sub"></p>
+      <div id="invite" class="invite">
         <div>
-          <div class="muted">โค้ดเชิญ</div>
+          <div class="hero-label">โค้ดเชิญ</div>
           <div id="party-code" class="code"></div>
         </div>
-        <button id="copy-link" class="btn btn-small" type="button">คัดลอกลิงก์เชิญ</button>
-        <div class="spacer"></div>
-        <button id="add-expense" class="btn btn-primary hidden" type="button">+ เพิ่มรายการ</button>
-        <button id="end-party" class="btn btn-danger hidden" type="button">ปิดปาร์ตี้และสรุป</button>
+        <button id="copy-link" class="btn btn-secondary btn-small" type="button"><i data-icon="link" data-size="16"></i>คัดลอกลิงก์เชิญ</button>
       </div>
-      <p id="copy-note" class="notice notice-ok hidden"></p>
-    </section>
-
-    <section id="settle-card" class="card stack hidden">
-      <h2 id="settle-title" class="card-title"></h2>
-      <div id="transfers" class="stack"></div>
-    </section>
-
-    <section id="balance-card" class="card hidden">
-      <h2 class="card-title">ยอดสุทธิ</h2>
-      <p class="muted" style="margin-top: -4px">บวก = ได้เงินคืน · ลบ = ต้องโอนให้คนอื่น</p>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>สมาชิก</th><th class="num">จ่ายไป</th><th class="num">ส่วนที่ต้องจ่าย</th><th class="num">สุทธิ</th></tr></thead>
-          <tbody id="balances"></tbody>
-        </table>
+      <div id="progress" class="progress-wrap hidden">
+        <div><span id="progress-text"></span><span id="progress-pct"></span></div>
+        <div class="progress"><span id="progress-bar"></span></div>
+      </div>
+      <div class="hero-actions">
+        <button id="add-expense" class="btn btn-primary hidden" type="button"><i data-icon="plus"></i>เพิ่มรายการ</button>
+        <button id="end-party" class="btn btn-danger hidden" type="button"><i data-icon="flag"></i>ปิดปาร์ตี้</button>
       </div>
     </section>
+    <p id="copy-note" class="notice notice-ok hidden"></p>
 
-    <section id="expense-card" class="card hidden">
-      <h2 class="card-title">รายการ <span id="total" class="muted"></span></h2>
-      <div id="expenses" class="stack"></div>
-      <p id="no-expenses" class="empty hidden">ยังไม่มีรายการ — กด "+ เพิ่มรายการ" เพื่ออัปสลิปหรือใส่ยอดเงินสด</p>
+    <section id="settle-card" class="stack-sm hidden">
+      <div id="settled-hero" class="success-hero hidden">
+        <span class="tile big round" style="background: var(--ok-ink); color: var(--surface)"><i data-icon="check" data-size="36"></i></span>
+        <h2>เคลียร์ครบแล้ว</h2>
+        <p class="muted small">ทุกคนโอนและยืนยันครบทุกรายการ ปาร์ตี้นี้ปิดเรียบร้อย</p>
+      </div>
+      <div class="section-head" style="margin: 0"><h2 id="settle-title"></h2></div>
+      <p id="settle-sub" class="muted small"></p>
+      <div id="transfers" class="stack-sm"></div>
     </section>
 
-    <section id="member-card" class="card hidden">
-      <h2 class="card-title">สมาชิก <span id="member-count" class="muted"></span></h2>
-      <div id="members" class="member-list"></div>
+    <section id="balance-card" class="card hidden" style="padding-bottom: 8px">
+      <h2 style="font-size: 1.05rem">ยอดสุทธิ</h2>
+      <p class="muted small">บวก = ได้เงินคืน · ลบ = ต้องโอนให้คนอื่น</p>
+      <ul id="balances" class="list" style="padding: 4px 0 0"></ul>
+    </section>
+
+    <section id="expense-card" class="stack-sm hidden">
+      <div class="section-head" style="margin: 0">
+        <h2>รายการ</h2>
+        <span id="total" class="muted small"></span>
+      </div>
+      <ul id="expenses" class="card list"></ul>
+      <div id="no-expenses" class="card empty-state hidden">
+        <span class="tile round big"><i data-icon="receipt" data-size="28"></i></span>
+        <strong>ยังไม่มีรายการ</strong>
+        <span class="muted small">กด “เพิ่มรายการ” เพื่ออัปสลิปหรือใส่ยอดเงินสด</span>
+      </div>
+    </section>
+
+    <section id="member-card" class="stack-sm hidden">
+      <div class="section-head" style="margin: 0">
+        <h2>สมาชิก</h2>
+        <span id="member-count" class="muted small"></span>
+      </div>
+      <ul id="members" class="card list"></ul>
     </section>
   </main>
 
-  <dialog id="expense-dialog" aria-labelledby="expense-title">
-    <div class="dialog-head">
+  <dialog id="expense-dialog" class="sheet" aria-labelledby="expense-title">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
       <h2 id="expense-title">เพิ่มรายการ</h2>
-      <button id="close-dialog" class="btn btn-small" type="button" aria-label="ปิด">✕</button>
+      <button id="close-dialog" class="icon-btn soft" type="button" aria-label="ปิด"><i data-icon="x"></i></button>
     </div>
-    <form id="expense-form" class="dialog-body">
-      <div id="slip-field" class="field">
-        <label for="slip-file">รูปสลิป (ไม่ใส่ก็ได้ ถ้าจ่ายเงินสด)</label>
-        <input id="slip-file" type="file" accept="image/png,image/jpeg">
-      </div>
-      <div id="reading" class="hidden" style="text-align: center">
-        <div class="spinner"></div>
-        <p>กำลังอ่านสลิป… อาจใช้เวลาสักครู่</p>
-      </div>
-      <p id="form-notice" class="notice hidden"></p>
-      <div class="row">
-        <div class="field">
+    <form id="expense-form" class="sheet-form">
+      <div class="sheet-body tinted">
+        <div id="slip-field">
+          <input id="slip-file" class="visually-hidden" type="file" accept="image/png,image/jpeg">
+          <label class="slip-attached" for="slip-file" style="margin: 0; cursor: pointer; color: var(--text)">
+            <span class="tile coral"><i data-icon="image" data-size="22"></i></span>
+            <span class="grow">
+              <span class="small muted" style="display: block">รูปสลิป (ไม่ใส่ก็ได้ ถ้าจ่ายเงินสด)</span>
+              <strong id="slip-label">แตะเพื่อแนบรูปสลิป</strong>
+            </span>
+            <i data-icon="upload" data-size="20"></i>
+          </label>
+        </div>
+        <div id="reading" class="reading hidden" role="status" style="padding: 0">
+          <div class="spinner"></div>
+          <span class="muted small">กำลังอ่านสลิป… อาจใช้เวลาสักครู่</span>
+        </div>
+        <p id="form-notice" class="notice hidden"></p>
+        <div class="amount-field">
           <label for="f-amount">ยอด (บาท)</label>
-          <input id="f-amount" inputmode="decimal" required placeholder="เช่น 1,234.50" maxlength="20">
+          <div class="amount-row">
+            <span class="currency" aria-hidden="true">฿</span>
+            <input id="f-amount" inputmode="decimal" required placeholder="0.00" maxlength="20" autocomplete="off">
+          </div>
         </div>
+        <fieldset>
+          <legend class="label-like">คนจ่าย</legend>
+          <div id="f-payer" class="chips"></div>
+        </fieldset>
         <div class="field">
-          <label for="f-payer">คนจ่าย</label>
-          <select id="f-payer" required></select>
+          <label for="f-note">หมายเหตุ</label>
+          <input id="f-note" maxlength="100" placeholder="เช่น ค่าหมูกระทะ">
         </div>
+        <fieldset>
+          <legend class="label-like" style="display: flex; justify-content: space-between; width: 100%">
+            ใครมีส่วน (หารเท่ากัน) <button id="select-all" class="btn-link" type="button">เลือกทุกคน</button>
+          </legend>
+          <div id="f-participants" class="card" style="padding: 4px 16px"></div>
+        </fieldset>
+        <p id="share-preview" class="share-note"></p>
+        <p id="save-error" class="notice notice-error hidden" role="alert"></p>
       </div>
-      <div class="field">
-        <label for="f-note">หมายเหตุ</label>
-        <input id="f-note" maxlength="100" placeholder="เช่น ค่าหมูกระทะ">
-      </div>
-      <fieldset class="field">
-        <legend class="label-like">ใครมีส่วน (หารเท่ากัน) — <button id="select-all" class="link-btn" type="button">เลือกทุกคน</button></legend>
-        <div id="f-participants" class="checkbox-list"></div>
-      </fieldset>
-      <p id="share-preview" class="muted"></p>
-      <p id="save-error" class="notice notice-error hidden" role="alert"></p>
-      <div class="dialog-actions">
-        <button id="cancel-dialog" class="btn" type="button">ยกเลิก</button>
-        <button id="save-expense" class="btn btn-primary" type="submit">บันทึก</button>
+      <div class="sheet-actions">
+        <button id="cancel-dialog" class="btn btn-secondary" type="button">ยกเลิก</button>
+        <button id="save-expense" class="btn btn-primary" type="submit"><i data-icon="check"></i>บันทึก</button>
       </div>
     </form>
   </dialog>

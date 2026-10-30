@@ -2,109 +2,124 @@
 <html lang="th">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f2ee">
   <title>รายจ่ายของฉัน · Money Capture</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="container">
-      <a class="brand" href="/dashboard">Money <span>Capture</span></a>
-      <span id="user" class="user"></span>
-      <a class="btn btn-small" href="/parties">ปาร์ตี้</a>
-      <a class="btn btn-small" href="/settings">ตั้งค่า</a>
-      <button id="logout" class="btn btn-small" type="button">ออกจากระบบ</button>
-    </div>
-  </header>
-
-  <main class="container stack">
-    <div class="toolbar">
-      <div class="field">
-        <label for="month">เดือน</label>
-        <input id="month" type="month">
+  <main class="app has-tabbar">
+    <header class="page-head">
+      <span id="avatar" class="avatar lg tone-dark" aria-hidden="true"></span>
+      <div class="grow">
+        <div class="hello">สวัสดี</div>
+        <div id="user" class="user-name"></div>
       </div>
-      <div class="spacer"></div>
-      <button id="open-upload" class="btn btn-primary" type="button">+ อัปโหลดสลิป</button>
-    </div>
+      <label class="pill" for="month">
+        <span class="visually-hidden">เดือน</span>
+        <input id="month" type="month">
+      </label>
+    </header>
 
     <p id="page-error" class="notice notice-error hidden" role="alert"></p>
 
-    <section class="stats">
-      <div class="card">
-        <div class="muted">รายจ่ายเดือนนี้</div>
-        <div id="total" class="stat-value">–</div>
-      </div>
-      <div class="card">
-        <div class="muted">จำนวนรายการ</div>
-        <div id="count" class="stat-value">–</div>
-      </div>
+    <section class="hero" aria-label="สรุปเดือนนี้">
+      <div class="hero-label">รายจ่ายเดือนนี้</div>
+      <div id="total" class="hero-amount">–</div>
+      <span class="chip"><i data-icon="receipt" data-size="14"></i><span><span id="count">–</span> รายการ</span></span>
+      <button id="open-upload" class="btn btn-primary" type="button" style="margin-top: 10px">
+        <i data-icon="upload"></i>อัปโหลดสลิป
+      </button>
     </section>
 
-    <section class="charts">
-      <div class="card">
-        <h2 class="muted" style="font-size: 1rem">แยกตามหมวด</h2>
-        <div class="chart-box"><canvas id="chart-category" aria-label="กราฟรายจ่ายแยกตามหมวด"></canvas></div>
-        <p id="chart-empty" class="empty hidden">ยังไม่มีข้อมูลเดือนนี้</p>
+    <section class="card stack">
+      <div class="card-head">
+        <h2>แยกตามหมวด</h2>
+        <span id="month-label" class="muted small"></span>
       </div>
-      <div class="card">
-        <h2 class="muted" style="font-size: 1rem">ย้อนหลัง 6 เดือน</h2>
-        <div class="chart-box"><canvas id="chart-monthly" aria-label="กราฟรายจ่ายรายเดือน"></canvas></div>
-      </div>
+      <div id="donut"></div>
+      <ul id="legend" class="legend"></ul>
+      <p id="chart-empty" class="empty hidden">ยังไม่มีข้อมูลเดือนนี้</p>
     </section>
 
-    <section class="card">
-      <h2 style="font-size: 1.1rem; margin-bottom: 8px">รายการ</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>วันที่</th><th>ผู้รับ</th><th>หมวด</th><th class="num">จำนวนเงิน</th><th>ที่มา</th><th></th>
-            </tr>
-          </thead>
-          <tbody id="rows"></tbody>
-        </table>
-      </div>
-      <p id="empty" class="empty hidden">ยังไม่มีรายการเดือนนี้ — อัปโหลดสลิปแรกได้เลย</p>
+    <section class="card stack">
+      <div class="card-head"><h2>ย้อนหลัง 6 เดือน</h2></div>
+      <div id="bars" class="bars" role="img"></div>
     </section>
+
+    <div class="section-head">
+      <h2>รายการ</h2>
+      <span id="list-meta" class="muted small"></span>
+    </div>
+    <ul id="rows" class="card list"></ul>
+    <div id="empty" class="card empty-state hidden">
+      <span class="tile round big"><i data-icon="receipt" data-size="28"></i></span>
+      <strong>ยังไม่มีรายการเดือนนี้</strong>
+      <span class="muted small">อัปโหลดสลิปแรกได้เลย — กดปุ่มสแกนตรงกลางด้านล่าง</span>
+    </div>
   </main>
 
-  <dialog id="upload-dialog" aria-labelledby="upload-title">
-    <div class="dialog-head">
+  <nav class="tabbar" aria-label="เมนูหลัก">
+    <a class="tab" href="/dashboard" aria-current="page"><i data-icon="home" data-size="22"></i><span>รายจ่าย</span></a>
+    <a class="tab" href="/parties" aria-label="ปาร์ตี้"><i data-icon="users" data-size="22"></i><span>ปาร์ตี้</span></a>
+    <a id="fab-upload" class="tab-fab" href="/dashboard?upload=1" aria-label="อัปโหลดสลิป"><i data-icon="scan" data-size="24"></i></a>
+    <a class="tab" href="/settings" aria-label="บัญชี"><i data-icon="user" data-size="22"></i><span>บัญชี</span></a>
+  </nav>
+
+  <dialog id="upload-dialog" class="sheet" aria-labelledby="upload-title">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
       <h2 id="upload-title">เพิ่มรายจ่าย</h2>
-      <button id="close-upload" class="btn btn-small" type="button" aria-label="ปิด">✕</button>
+      <button id="close-upload" class="icon-btn soft" type="button" aria-label="ปิด"><i data-icon="x"></i></button>
     </div>
-    <div class="dialog-body">
-      <!-- ขั้นที่ 1: เลือกรูป -->
-      <div id="step-pick">
-        <div class="field">
-          <label for="slip-file">รูปสลิป (PNG / JPEG ไม่เกิน 10 MB)</label>
-          <input id="slip-file" type="file" accept="image/png,image/jpeg">
-        </div>
-        <button id="manual-entry" class="btn btn-small" type="button">กรอกเองโดยไม่ใช้สลิป</button>
-      </div>
 
-      <!-- ขั้นที่ 2: กำลังอ่าน -->
-      <div id="step-reading" class="hidden" style="text-align: center">
+    <!-- ขั้นที่ 1: เลือกรูป -->
+    <div id="step-pick" class="sheet-body">
+      <input id="slip-file" class="visually-hidden" type="file" accept="image/png,image/jpeg">
+      <label class="dropzone" for="slip-file">
+        <span class="tile big coral"><i data-icon="image" data-size="28"></i></span>
+        <strong>แตะเพื่อเลือกรูปสลิป</strong>
+        <span class="small">PNG / JPEG ไม่เกิน 10 MB · ถ่ายใหม่หรือเลือกจากคลังรูป</span>
+      </label>
+      <label class="btn btn-primary btn-block" for="slip-file"><i data-icon="upload"></i>เลือกรูปสลิป</label>
+      <button id="manual-entry" class="btn btn-secondary btn-block" type="button"><i data-icon="pencil"></i>กรอกเองโดยไม่ใช้สลิป</button>
+      <p class="notice">ส่งสลิปเข้าบอท Discord ได้ด้วย — เชื่อมบัญชีที่หน้า “บัญชี” แล้วสลิปจะขึ้นที่นี่อัตโนมัติ</p>
+    </div>
+
+    <!-- ขั้นที่ 2: กำลังอ่าน -->
+    <div id="step-reading" class="sheet-body hidden">
+      <div class="reading" role="status">
+        <div class="scan-box"><img id="reading-preview" alt=""></div>
         <div class="spinner"></div>
-        <p>กำลังอ่านสลิป… อาจใช้เวลาสักครู่</p>
+        <strong>กำลังอ่านสลิป…</strong>
+        <span class="muted small">อ่าน QR เพื่อหาเลขอ้างอิง แล้วอ่านยอดเงิน วันที่ และผู้รับ — อาจใช้เวลาสักครู่</span>
       </div>
+    </div>
 
-      <!-- ขั้นที่ 3: ตรวจ/แก้ แล้วบันทึก -->
-      <form id="step-form" class="hidden">
-        <img id="preview" class="preview hidden" alt="รูปสลิป">
+    <!-- ขั้นที่ 3: ตรวจ/แก้ แล้วบันทึก -->
+    <form id="step-form" class="sheet-form hidden">
+      <div class="sheet-body tinted">
         <p id="form-notice" class="notice hidden"></p>
-        <div class="row">
-          <div class="field">
-            <label for="f-amount">จำนวนเงิน (บาท)</label>
-            <input id="f-amount" type="number" inputmode="decimal" min="0.01" step="0.01" required>
-          </div>
-          <div class="field">
-            <label for="f-category">หมวด</label>
-            <select id="f-category" required></select>
+        <div id="slip-attached" class="slip-attached hidden">
+          <img id="preview" class="thumb" alt="รูปสลิป">
+          <div class="grow">
+            <div class="small muted">แนบสลิปแล้ว</div>
+            <strong>ตรวจข้อมูลก่อนบันทึก</strong>
           </div>
         </div>
+        <div class="amount-field">
+          <label for="f-amount">จำนวนเงิน (บาท)</label>
+          <div class="amount-row">
+            <span class="currency" aria-hidden="true">฿</span>
+            <input id="f-amount" type="number" inputmode="decimal" min="0.01" step="0.01" required placeholder="0.00">
+          </div>
+        </div>
+        <fieldset>
+          <legend class="label-like">หมวด</legend>
+          <div id="f-category" class="chips"></div>
+        </fieldset>
         <div class="row">
           <div class="field">
             <label for="f-date">วันที่</label>
@@ -121,19 +136,18 @@
         </div>
         <div class="field">
           <label for="f-note">โน้ต</label>
-          <input id="f-note" maxlength="500">
+          <input id="f-note" maxlength="500" placeholder="เพิ่มโน้ต (ไม่บังคับ)">
         </div>
         <p id="save-error" class="notice notice-error hidden" role="alert"></p>
-        <div class="dialog-actions">
-          <button id="cancel-upload" class="btn" type="button">ยกเลิก</button>
-          <button id="save" class="btn btn-primary" type="submit">บันทึก</button>
-        </div>
-      </form>
-    </div>
+      </div>
+      <div class="sheet-actions">
+        <button id="cancel-upload" class="btn btn-secondary" type="button">ยกเลิก</button>
+        <button id="save" class="btn btn-primary" type="submit"><i data-icon="check"></i>บันทึก</button>
+      </div>
+    </form>
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <script src="/static/app.js"></script>
   <script src="/static/charts.js"></script>
   <script src="/static/dashboard.js"></script>
