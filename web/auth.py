@@ -46,11 +46,12 @@ class SupabaseAuth:
 
 
 def display_name(data: dict[str, Any]) -> str:
-    """ชื่อที่แสดง: ชื่อ Discord (global name) → ชื่อเต็ม → ชื่อผู้ใช้ → อีเมล"""
+    """ชื่อที่แสดง: ชื่อ Discord (global name) → ชื่อเต็ม → ชื่อผู้ใช้ → อีเมลส่วนหน้า @"""
     meta = data.get("user_metadata") or {}
     claims = meta.get("custom_claims") or {}
-    for value in (claims.get("global_name"), meta.get("full_name"), meta.get("name"), meta.get("user_name"),
-                  data.get("email")):
+    email = data.get("email")
+    local = email.split("@", 1)[0] if isinstance(email, str) else None
+    for value in (claims.get("global_name"), meta.get("full_name"), meta.get("name"), meta.get("user_name"), local):
         if isinstance(value, str) and value.strip():
             return value.strip()[:100]
     return "ผู้ใช้"

@@ -33,7 +33,7 @@ def test_get_user_returns_auth_user():
     auth, seen = make_auth(lambda req: httpx.Response(200, json=USER_JSON))
     user = auth.get_user("tok")
     assert user == AuthUser(id="user-a", email="a@example.com", discord_id="123", providers=("google", "discord"),
-                            name="a@example.com")
+                            name="a")
     assert str(seen[0].url) == f"{URL}/auth/v1/user"
     assert seen[0].headers["apikey"] == ANON
     assert seen[0].headers["authorization"] == "Bearer tok"
@@ -83,7 +83,8 @@ def test_discord_id_from_identities(identities, expected):
          "สมชาย"),
         ({"email": "a@x.com", "user_metadata": {"full_name": "Somchai J"}}, "Somchai J"),
         ({"email": "a@x.com", "user_metadata": {"name": "somchai#0"}}, "somchai#0"),
-        ({"email": "somchai@x.com", "user_metadata": {}}, "somchai@x.com"),
+        ({"email": "somchai@x.com", "user_metadata": {}}, "somchai"),
+        ({"email": "  @x.com", "user_metadata": {}}, "ผู้ใช้"),
         ({"email": None, "user_metadata": None}, "ผู้ใช้"),
     ],
 )
