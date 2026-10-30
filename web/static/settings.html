@@ -10,8 +10,12 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <main class="app has-tabbar">
-    <h1 class="page-title">บัญชีของฉัน</h1>
+  <main class="app">
+    <header class="topbar">
+      <a id="back" class="icon-btn" href="/dashboard" aria-label="กลับ"><i data-icon="chevron-left"></i></a>
+      <h1 class="top-title">บัญชีของฉัน</h1>
+      <span style="width: 44px" aria-hidden="true"></span>
+    </header>
 
     <section class="card stack" style="align-items: center; text-align: center">
       <span id="avatar" class="avatar xl tone-dark" aria-hidden="true"></span>
@@ -45,16 +49,16 @@
     <button id="logout" class="btn btn-secondary btn-block btn-text-danger" type="button"><i data-icon="logout"></i>ออกจากระบบ</button>
   </main>
 
-  <nav class="tabbar" aria-label="เมนูหลัก">
-    <a class="tab" href="/dashboard" aria-label="รายจ่าย"><i data-icon="home" data-size="22"></i><span>รายจ่าย</span></a>
-    <a class="tab" href="/parties" aria-label="ปาร์ตี้"><i data-icon="users" data-size="22"></i><span>ปาร์ตี้</span></a>
-    <a class="tab-fab" href="/dashboard?upload=1" aria-label="อัปโหลดสลิป"><i data-icon="scan" data-size="24"></i></a>
-    <a class="tab" href="/settings" aria-current="page"><i data-icon="user" data-size="22"></i><span>บัญชี</span></a>
-  </nav>
-
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
   <script src="/static/app.js"></script>
   <script>
+    // ปุ่มกลับ: มาจากหน้าไหนในแอปก็กลับหน้านั้น (เปิดตรง ๆ → ไป /dashboard ตาม href)
+    document.getElementById("back").addEventListener("click", (event) => {
+      if (document.referrer.startsWith(location.origin) && history.length > 1) {
+        event.preventDefault();
+        history.back();
+      }
+    });
     (async () => {
       const PROVIDER_NAMES = { discord: "Discord", google: "Google", email: "อีเมล" };
       const PROVIDER_ICONS = { email: "mail" };

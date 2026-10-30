@@ -12,11 +12,13 @@
 <body>
   <main class="app has-tabbar">
     <header class="page-head">
-      <span id="avatar" class="avatar lg tone-dark" aria-hidden="true"></span>
-      <div class="grow">
-        <div class="hello">สวัสดี</div>
-        <div id="user" class="user-name"></div>
-      </div>
+      <a class="profile-link" href="/settings" aria-label="บัญชีของฉัน">
+        <span id="avatar" class="avatar lg tone-dark" aria-hidden="true"></span>
+        <div class="grow">
+          <div class="hello">สวัสดี</div>
+          <div id="user" class="user-name"></div>
+        </div>
+      </a>
       <label class="pill" for="month">
         <span class="visually-hidden">เดือน</span>
         <input id="month" type="month">
@@ -63,9 +65,8 @@
 
   <nav class="tabbar" aria-label="เมนูหลัก">
     <a class="tab" href="/dashboard" aria-current="page"><i data-icon="home" data-size="22"></i><span>รายจ่าย</span></a>
-    <a class="tab" href="/parties" aria-label="ปาร์ตี้"><i data-icon="users" data-size="22"></i><span>ปาร์ตี้</span></a>
     <a id="fab-upload" class="tab-fab" href="/dashboard?upload=1" aria-label="อัปโหลดสลิป"><i data-icon="scan" data-size="24"></i></a>
-    <a class="tab" href="/settings" aria-label="บัญชี"><i data-icon="user" data-size="22"></i><span>บัญชี</span></a>
+    <a class="tab" href="/parties" aria-label="ปาร์ตี้"><i data-icon="users" data-size="22"></i><span>ปาร์ตี้</span></a>
   </nav>
 
   <dialog id="upload-dialog" class="sheet" aria-labelledby="upload-title">

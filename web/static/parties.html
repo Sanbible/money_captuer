@@ -11,10 +11,11 @@
 </head>
 <body>
   <main class="app has-tabbar">
-    <div class="stack-sm" style="gap: 6px">
-      <h1 class="page-title">ปาร์ตี้หารค่าใช้จ่าย</h1>
-      <p class="muted small">ไปเที่ยวหรือกินข้าวกับเพื่อน ใครจ่ายอะไรก็บันทึกไว้ แล้วระบบสรุปให้ว่าใครต้องโอนให้ใครเท่าไหร่</p>
-    </div>
+    <header class="page-head">
+      <a id="avatar" class="avatar lg tone-dark" href="/settings" aria-label="บัญชีของฉัน"></a>
+      <h1 class="page-title grow" style="font-size: 1.4rem">ปาร์ตี้หารค่าใช้จ่าย</h1>
+    </header>
+    <p class="muted small" style="margin-top: -8px">ไปเที่ยวหรือกินข้าวกับเพื่อน ใครจ่ายอะไรก็บันทึกไว้ แล้วระบบสรุปให้ว่าใครต้องโอนให้ใครเท่าไหร่</p>
 
     <p id="page-error" class="notice notice-error hidden" role="alert"></p>
 
@@ -30,10 +31,13 @@
     <form id="join-form" class="card stack">
       <h2 class="card-title-row"><span class="tile" style="width: 32px; height: 32px; border-radius: 12px"><i data-icon="hash" data-size="18"></i></span>เข้าร่วมด้วยโค้ด</h2>
       <div class="field">
-        <label for="join-code">โค้ด 6 ตัวจากเพื่อน หรือเปิดลิงก์เชิญที่เพื่อนส่งมา</label>
+        <label for="join-code">โค้ด 6 ตัวจากเพื่อน หรือวางลิงก์เชิญที่เพื่อนส่งมา</label>
         <div class="join-row">
-          <input id="join-code" class="code-input" maxlength="20" required placeholder="K7QM4X" autocapitalize="characters" autocomplete="off">
-          <button id="join-btn" class="icon-btn dark" type="submit" aria-label="เข้าร่วม"><i data-icon="arrow-right"></i></button>
+          <div class="code-field">
+            <div id="code-boxes" class="code-boxes" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            <input id="join-code" required autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false">
+          </div>
+          <button id="join-btn" class="icon-btn dark" type="submit" aria-label="เข้าร่วม" disabled><i data-icon="arrow-right"></i></button>
         </div>
       </div>
     </form>
@@ -52,9 +56,8 @@
 
   <nav class="tabbar" aria-label="เมนูหลัก">
     <a class="tab" href="/dashboard" aria-label="รายจ่าย"><i data-icon="home" data-size="22"></i><span>รายจ่าย</span></a>
-    <a class="tab" href="/parties" aria-current="page"><i data-icon="users" data-size="22"></i><span>ปาร์ตี้</span></a>
     <a class="tab-fab" href="/dashboard?upload=1" aria-label="อัปโหลดสลิป"><i data-icon="scan" data-size="24"></i></a>
-    <a class="tab" href="/settings" aria-label="บัญชี"><i data-icon="user" data-size="22"></i><span>บัญชี</span></a>
+    <a class="tab" href="/parties" aria-current="page"><i data-icon="users" data-size="22"></i><span>ปาร์ตี้</span></a>
   </nav>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
@@ -64,11 +67,14 @@
       const $ = (id) => document.getElementById(id);
       const { el } = MC;
       const STATUS = { open: "เปิดอยู่", closed: "รอโอนเงิน", settled: "เคลียร์แล้ว" };
+      const CODE_LENGTH = 6;
+      let session;
       try {
-        await MC.requireSession();
+        session = await MC.requireSession();
       } catch {
         return;
       }
+      $("avatar").textContent = MC.initial(MC.displayName(session.user));
 
       const pageError = (text) => {
         $("page-error").textContent = text || "";
@@ -118,15 +124,35 @@
         }
       });
 
+      // ช่องโค้ด: รับได้ทั้งโค้ดและลิงก์เชิญ (.../join/K7QM4X) → เหลือตัวอักษร/ตัวเลข 6 ตัว แสดงลงกล่อง
+      const codeInput = $("join-code");
+      const codeBoxes = [...$("code-boxes").children];
+      const normalizeCode = (raw) => {
+        const fromLink = raw.match(/\/join\/([^/?#\s]+)/i);
+        return (fromLink ? fromLink[1] : raw).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, CODE_LENGTH);
+      };
+      function renderCode() {
+        const code = normalizeCode(codeInput.value);
+        if (codeInput.value !== code) codeInput.value = code;
+        const focused = document.activeElement === codeInput;
+        codeBoxes.forEach((box, i) => {
+          box.textContent = code[i] || "";
+          box.classList.toggle("active", focused && i === Math.min(code.length, CODE_LENGTH - 1));
+        });
+        $("join-btn").disabled = code.length !== CODE_LENGTH;
+      }
+      for (const type of ["input", "focus", "blur"]) codeInput.addEventListener(type, renderCode);
+      renderCode();
+
       $("join-form").addEventListener("submit", async (event) => {
         event.preventDefault();
         $("join-btn").disabled = true;
         pageError("");
         try {
-          const res = await MC.api("/api/parties/join", { method: "POST", json: { code: $("join-code").value.trim() } });
+          const res = await MC.api("/api/parties/join", { method: "POST", json: { code: codeInput.value } });
           location.href = `/party/${res.id}`;
         } catch (e) {
-          $("join-btn").disabled = false;
+          renderCode();
           pageError(e.message);
         }
       });
