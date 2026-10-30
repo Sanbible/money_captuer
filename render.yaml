@@ -14,6 +14,8 @@ services:
         sync: false
       - key: TYPHOON_LLM_MODEL
         value: typhoon-v2.5-30b-a3b-instruct
+      - key: GEMINI_API_KEY   # ไม่บังคับ: ใส่แล้วอ่านสลิปด้วย Gemini (~2.5 วิ) มี Typhoon สำรอง
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY

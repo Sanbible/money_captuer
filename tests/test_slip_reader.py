@@ -435,6 +435,70 @@ def test_read_slip_expect_mismatch_still_asks_llm(fake) -> None:
     assert [c["model"] for c in client.calls] == ["typhoon-ocr", MODEL]
 
 
+# ---------------------------------------------------------------- Gemini เป็นตัวหลัก, Typhoon สำรอง
+
+GEMINI_KEY = "g-SECRET-gemini-456"
+GEMINI_MODEL = "gemini-test-lite"
+GEMINI_JSON = '{"amount": 104, "date": "2569-10-28", "time": "13:21", "receiver": "นายสมมติ ทดสอบดี"}'
+LLM_JSON = '{"amount": 85, "date": null, "time": null, "receiver": null}'
+
+
+def test_gemini_reads_slip_in_one_call(fake) -> None:
+    client = fake(GEMINI_JSON)
+    result = slip_reader.read_slip(_png(10, 10), API_KEY, MODEL, gemini_key=GEMINI_KEY, gemini_model=GEMINI_MODEL)
+    assert result == SlipData(amount=104.0, date="2026-10-28", time="13:21", receiver="นายสมมติ ทดสอบดี")
+    assert len(client.calls) == 1
+    init = client.init_kwargs[0]
+    assert init["api_key"] == GEMINI_KEY and "generativelanguage.googleapis.com" in str(init["base_url"])
+    assert init["timeout"] == slip_reader.GEMINI_TIMEOUT and init["max_retries"] == 0
+    call = client.calls[0]
+    assert call["model"] == GEMINI_MODEL and call["temperature"] == 0
+    mime, _ = _sent_image(call)
+    assert mime == "image/jpeg"
+    prompt = call["messages"][0]["content"][0]["text"]
+    assert "JSON" in prompt and "ค่าธรรมเนียม" in prompt and "พ.ศ." in prompt
+    assert "ผล OCR" not in prompt  # บอก Gemini ว่าเป็นรูป ไม่ใช่ข้อความ OCR
+
+
+@pytest.mark.parametrize("gemini_outcome", [
+    lambda: _status_error(openai.InternalServerError, 503),  # คนใช้เยอะ
+    lambda: _rate_limit(),
+    lambda: openai.APITimeoutError(request=httpx.Request("POST", CHAT_URL)),
+    lambda: "ขอโทษ อ่านไม่ได้",  # ไม่ใช่ JSON
+    lambda: '{"amount": null, "date": null, "time": null, "receiver": null}',  # อ่านยอดไม่ได้
+])
+def test_gemini_problem_falls_back_to_typhoon(fake, sleeps, gemini_outcome) -> None:
+    client = fake(gemini_outcome(), OCR_TEXT, LLM_JSON)
+    result = slip_reader.read_slip(_png(10, 10), API_KEY, MODEL, gemini_key=GEMINI_KEY, gemini_model=GEMINI_MODEL)
+    assert result.amount == 85.0 and result.error is None
+    assert [c["model"] for c in client.calls] == [GEMINI_MODEL, "typhoon-ocr", MODEL]
+    assert sleeps == []  # Gemini 429 ไม่รอ backoff — ไป Typhoon ทันที
+
+
+def test_gemini_failure_log_names_gemini(fake, caplog) -> None:
+    fake(_status_error(openai.NotFoundError, 404), OCR_TEXT, LLM_JSON)
+    slip_reader.read_slip(_png(10, 10), API_KEY, MODEL, gemini_key=GEMINI_KEY, gemini_model=GEMINI_MODEL)
+    warning = next(r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
+    assert "Gemini API ตอบกลับ HTTP 404" in warning and "Typhoon API" not in warning
+
+
+def test_without_gemini_key_uses_typhoon_only(fake) -> None:
+    client = fake(OCR_TEXT, LLM_JSON)
+    slip_reader.read_slip(_png(10, 10), API_KEY, MODEL, gemini_key="")
+    assert [c["model"] for c in client.calls] == ["typhoon-ocr", MODEL]
+
+
+def test_gemini_does_not_log_key_or_receiver(fake, caplog) -> None:
+    caplog.set_level(logging.DEBUG)
+    fake(GEMINI_JSON)
+    slip_reader.read_slip(_png(10, 10), API_KEY, MODEL, gemini_key=GEMINI_KEY, gemini_model=GEMINI_MODEL)
+    fake(_auth_error(), OCR_TEXT, LLM_JSON)
+    slip_reader.read_slip(_png(10, 10), API_KEY, MODEL, gemini_key=GEMINI_KEY, gemini_model=GEMINI_MODEL)
+    assert caplog.records
+    for record in caplog.records:
+        assert GEMINI_KEY not in record.getMessage() and "สมมติ" not in record.getMessage()
+
+
 # ---------------------------------------------------------------- ยิง OCR ซ้ำ ใช้คำตอบแรก (hedged request)
 
 @pytest.fixture

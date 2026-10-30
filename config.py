@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent
 
 DEFAULT_LLM_MODEL = "typhoon-v2.5-30b-a3b-instruct"
+# อ่านสลิปตัวหลัก (ไม่บังคับ): วัดกับสลิปจริงได้ ~2.5 วิ เทียบ Typhoon 20–60 วิ ; Flash ตัวเต็มล่มบ่อยช่วงคนใช้เยอะ
+DEFAULT_GEMINI_MODEL = "gemini-flash-lite-latest"
 DEFAULT_CATEGORIES = (
     "อาหาร", "เครื่องดื่ม/กาแฟ", "เดินทาง", "ช้อปปิ้ง", "ของใช้",
     "บิล/ค่าบริการ", "สุขภาพ", "บันเทิง", "อื่นๆ",
@@ -19,6 +21,7 @@ DEFAULT_CATEGORIES = (
 # ตัวแปรที่มีค่าเริ่มต้น ไม่ต้องกรอกก็ได้
 ENV_DEFAULTS = {
     "TYPHOON_LLM_MODEL": DEFAULT_LLM_MODEL,
+    "GEMINI_MODEL": DEFAULT_GEMINI_MODEL,
 }
 
 # เว็บ (uvicorn web.app:create_default_app --factory)
@@ -44,6 +47,8 @@ class Config:
     supabase_service_role_key: str  # ใช้ฝั่ง server เท่านั้น ห้ามส่งไป browser
     public_base_url: str  # URL ของเว็บ เช่น https://xxx.onrender.com ("" = ไม่ได้ตั้ง)
     categories: tuple[str, ...]
+    gemini_api_key: str = ""  # "" = ไม่ใช้ Gemini อ่านด้วย Typhoon อย่างเดียว
+    gemini_model: str = DEFAULT_GEMINI_MODEL
 
 
 def _env(name: str, default: str = "") -> str:
@@ -76,4 +81,6 @@ def load_config(required: Iterable[str] = ALL_REQUIRED) -> Config:
         supabase_service_role_key=_env("SUPABASE_SERVICE_ROLE_KEY"),
         public_base_url=_env("PUBLIC_BASE_URL").rstrip("/"),
         categories=categories,
+        gemini_api_key=_env("GEMINI_API_KEY"),
+        gemini_model=_env("GEMINI_MODEL", ENV_DEFAULTS["GEMINI_MODEL"]),
     )

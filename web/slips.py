@@ -25,14 +25,18 @@ class SlipDraft:
     error: str | None  # เหตุผลเมื่อ OCR ล้ม (None = สำเร็จ)
 
 
-def read_draft(data: bytes, mime: str, api_key: str, model: str, *, expect: float | None = None) -> SlipDraft:
-    """QR (เลขอ้างอิง/ธนาคาร) คู่ขนานกับ Typhoon OCR/LLM (ยอด/วันที่/ผู้รับ) ; ไม่ raise
+def read_draft(
+    data: bytes, mime: str, api_key: str, model: str, *, expect: float | None = None, gemini_key: str = "",
+    gemini_model: str = "",
+) -> SlipDraft:
+    """QR (เลขอ้างอิง/ธนาคาร) คู่ขนานกับการอ่านยอด/วันที่/ผู้รับ (Gemini ถ้ามี key → Typhoon สำรอง) ; ไม่ raise
 
-    expect = ยอดที่คาดไว้ (ตรวจสลิปการโอนในปาร์ตี้) — ถ้า OCR เห็นยอดนี้พอดีจะข้ามขั้น LLM
+    expect = ยอดที่คาดไว้ (ตรวจสลิปการโอนในปาร์ตี้) — ถ้า Typhoon OCR เห็นยอดนี้พอดีจะข้ามขั้น LLM
     """
     with ThreadPoolExecutor(max_workers=1) as pool:
-        qr_job = pool.submit(slip_qr.read_slip_qr, data)  # อ่าน QR ในเครื่องระหว่างรอ Typhoon
-        slip = slip_reader.read_slip(data, api_key, model, mime, copies=OCR_COPIES, expect=expect)
+        qr_job = pool.submit(slip_qr.read_slip_qr, data)  # อ่าน QR ในเครื่องระหว่างรอ API
+        slip = slip_reader.read_slip(data, api_key, model, mime, copies=OCR_COPIES, expect=expect,
+                                     gemini_key=gemini_key, gemini_model=gemini_model)
         qr = qr_job.result() or {}
     amount = slip.amount
     if not isinstance(amount, (int, float)) or not math.isfinite(amount) or amount <= 0:

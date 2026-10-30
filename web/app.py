@@ -11,6 +11,7 @@ import hashlib
 import logging
 from dataclasses import asdict
 from datetime import date
+from functools import partial
 from pathlib import Path
 from typing import Annotated, Any, Callable
 from uuid import UUID
@@ -157,7 +158,9 @@ def create_default_app() -> FastAPI:
     store = ExpenseStore(cfg.supabase_url, cfg.supabase_service_role_key)
     auth = SupabaseAuth(cfg.supabase_url, cfg.supabase_anon_key)
     party_store = PartyStore(cfg.supabase_url, cfg.supabase_service_role_key)
-    return create_app(cfg, store=store, auth=auth, party_store=party_store)
+    reader = partial(read_draft, gemini_key=cfg.gemini_api_key, gemini_model=cfg.gemini_model)
+    log.info("อ่านสลิปด้วย %s", f"Gemini ({cfg.gemini_model}) + Typhoon สำรอง" if cfg.gemini_api_key else "Typhoon")
+    return create_app(cfg, store=store, auth=auth, reader=reader, party_store=party_store)
 
 
 # ---------------------------------------------------------------------- helpers

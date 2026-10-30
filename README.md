@@ -16,7 +16,7 @@
 | หน้าเว็บ | HTML + CSS + JavaScript (ไม่ใช้ framework) ออกแบบสำหรับมือถือ ธีม Cashly — กราฟวาดด้วย SVG/HTML เอง |
 | Login | Supabase Auth (Discord, Google, อีเมล) ผ่าน supabase-js |
 | ฐานข้อมูล | Supabase Postgres (PostgREST + SQL functions) เปิด Row Level Security |
-| อ่านสลิป | OpenCV (อ่าน QR), Typhoon OCR + Typhoon LLM (ดึงยอด/วันที่/ผู้รับ) |
+| อ่านสลิป | OpenCV (อ่าน QR), Gemini Flash-Lite อ่านรูปเป็น JSON (ตัวหลัก ~2.5 วิ) → สำรองด้วย Typhoon OCR + Typhoon LLM |
 | Deploy | Render (web service), GitHub |
 | Test | pytest, FastAPI TestClient, httpx MockTransport |
 
@@ -45,7 +45,7 @@
 Browser ──(supabase-js: login)──▶ Supabase Auth
    │  Authorization: Bearer <access token>
    ▼
-FastAPI (Render) ──▶ slip_qr / slip_reader ──▶ Typhoon API
+FastAPI (Render) ──▶ slip_qr / slip_reader ──▶ Gemini API (ตัวหลัก) / Typhoon API (สำรอง)
    │  ตรวจ token กับ Supabase Auth แล้วตรวจสิทธิ์ทุก request (เจ้าของรายการ / สมาชิกปาร์ตี้)
    ▼
 Supabase Postgres: expenses (รายจ่ายส่วนตัว) · parties / party_* (ปาร์ตี้ + SQL functions)
@@ -69,7 +69,7 @@ money_capture/
 ├── party_store.py       # ตารางปาร์ตี้ + เรียก SQL functions
 ├── party_math.py        # หาร / ยอดสุทธิ / รายการโอน (สตางค์)
 ├── slip_qr.py           # อ่าน QR + แปลง EMVCo TLV
-├── slip_reader.py       # Typhoon OCR + Typhoon LLM + regex สำรอง
+├── slip_reader.py       # Gemini → Typhoon OCR + Typhoon LLM → regex สำรอง
 ├── slip_common.py       # helper กลาง (วันที่ เวลา ยอดเงิน เขตเวลาไทย ชนิดรูป)
 ├── config.py            # โหลดค่าตั้งค่าจาก .env
 ├── supabase/
@@ -121,6 +121,8 @@ Copy-Item .env.example .env
 | `PUBLIC_BASE_URL` | URL ของเว็บ (ใช้สร้างลิงก์เชิญปาร์ตี้) ไม่ใส่ก็ได้ |
 | `TYPHOON_API_KEY` | API key จาก opentyphoon.ai |
 | `TYPHOON_LLM_MODEL` | ค่าเริ่มต้น `typhoon-v2.5-30b-a3b-instruct` |
+| `GEMINI_API_KEY` | ไม่บังคับ — key ฟรีจาก Google AI Studio ; ใส่แล้วอ่านสลิปด้วย Gemini ก่อน (Typhoon เป็นสำรอง) |
+| `GEMINI_MODEL` | ค่าเริ่มต้น `gemini-flash-lite-latest` |
 | `CATEGORIES` | หมวดรายจ่าย คั่นด้วย `,` (ไม่เกิน 25 หมวด) |
 
 ### 4) รัน
@@ -143,7 +145,8 @@ python -m uvicorn web.app:create_default_app --factory --reload      # เว็
 ## ความปลอดภัย / ความเป็นส่วนตัว
 
 - `.env` อยู่ใน `.gitignore` — ตรวจก่อน push ทุกครั้งว่าไม่มีคีย์หลุด
-- **รูปสลิปถูกส่งไป Typhoon API** (บริษัทภายนอก) เพื่อทำ OCR; ระบบไม่เก็บไฟล์รูป
+- **รูปสลิปถูกส่งไป Gemini API และ/หรือ Typhoon API** (บริษัทภายนอก) เพื่ออ่านข้อมูล; ระบบไม่เก็บไฟล์รูป
+  (Gemini แบบฟรี: Google อาจใช้ข้อมูลที่ส่งไปปรับปรุงผลิตภัณฑ์ — ไม่ตั้ง `GEMINI_API_KEY` = ใช้ Typhoon อย่างเดียว)
 - ระบบ**ไม่ได้ตรวจสลิปปลอมกับธนาคาร** และปุ่ม "โอนแล้ว" เชื่อตามที่สมาชิกกด
 - ปาร์ตี้ที่ไม่ได้เป็นสมาชิก เปิดดูไม่ได้ (API ตอบเหมือนไม่มีปาร์ตี้นั้น)
 

@@ -17,7 +17,7 @@ ENV = {
 @pytest.fixture(autouse=True)
 def isolated_env(monkeypatch):
     monkeypatch.setattr(config, "load_dotenv", lambda *a, **k: None)
-    for name in (*ENV, "PUBLIC_BASE_URL", "CATEGORIES", "TYPHOON_LLM_MODEL"):
+    for name in (*ENV, "PUBLIC_BASE_URL", "CATEGORIES", "TYPHOON_LLM_MODEL", "GEMINI_API_KEY", "GEMINI_MODEL"):
         monkeypatch.delenv(name, raising=False)
     for name, value in ENV.items():
         monkeypatch.setenv(name, value)
@@ -39,6 +39,18 @@ def test_missing_supabase_url_raises(monkeypatch):
 def test_config_has_no_discord_bot_settings():
     cfg = load_config(required=WEB_REQUIRED)
     assert not hasattr(cfg, "discord_token") and not hasattr(cfg, "google_sheet_id")
+
+
+def test_gemini_is_optional():
+    cfg = load_config(required=WEB_REQUIRED)
+    assert cfg.gemini_api_key == "" and cfg.gemini_model == "gemini-flash-lite-latest"
+
+
+def test_gemini_settings_read_from_env(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", " g-key ")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-x")
+    cfg = load_config(required=WEB_REQUIRED)
+    assert cfg.gemini_api_key == "g-key" and cfg.gemini_model == "gemini-x"
 
 
 def test_public_base_url_defaults_to_empty():

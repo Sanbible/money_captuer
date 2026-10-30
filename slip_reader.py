@@ -326,6 +326,51 @@ def extract_fields(ocr_text: str, api_key: str, model: str) -> SlipData:
     )
 
 
+# =============================================================== Gemini (ตัวหลัก ถ้าตั้ง GEMINI_API_KEY)
+# อ่านรูป → JSON ใน request เดียว ผ่าน endpoint แบบ OpenAI ของ Gemini (ใช้ openai SDK ตัวเดิม)
+# วัดกับสลิปจริง: ~2.5 วิ ; ล้ม/ช้า/อ่านยอดไม่ได้ → read_slip ไปใช้ Typhoon ต่อ
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+GEMINI_TIMEOUT = 15.0  # เกินนี้ถือว่าล้ม ไปใช้ Typhoon
+GEMINI_PROMPT = LLM_SYSTEM_PROMPT.replace(
+    "ข้อความที่ได้รับคือผล OCR (Markdown/HTML) ของสลิป 1 ใบ อาจสะกดผิดหรือเว้นวรรคเพี้ยนเล็กน้อย",
+    "สิ่งที่ได้รับคือรูปสลิป 1 ใบ",
+)
+
+
+def gemini_fields(image_bytes: bytes, api_key: str, model: str, mime_type: str = "image/png") -> SlipData:
+    """ส่งรูปสลิปไป Gemini → SlipData ; ล้มเหลว raise (ไม่ retry — ผู้เรียกไปใช้ Typhoon แทน)"""
+    mime, b64 = _encode_image(image_bytes, mime_type)
+    text = f"{GEMINI_PROMPT}\nวันนี้ (ค.ศ.): {_date.today().isoformat()}\nตอบเป็น JSON object เดียวเท่านั้น"
+    messages = [{"role": "user", "content": [
+        {"type": "text", "text": text},
+        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+    ]}]
+    with OpenAI(api_key=api_key, base_url=GEMINI_BASE_URL, timeout=GEMINI_TIMEOUT, max_retries=0) as client:
+        response = client.chat.completions.create(model=model, messages=messages, temperature=0,
+                                                  max_tokens=LLM_MAX_TOKENS)
+    data = _parse_json_object(_message_text(response))
+    return SlipData(
+        amount=_coerce_amount(data.get("amount")),
+        date=_normalize_date(data.get("date")),
+        time=_normalize_time(data.get("time")),
+        receiver=_clean_receiver(data.get("receiver")),
+    )
+
+
+def _try_gemini(image_bytes: bytes, api_key: str, model: str, mime_type: str) -> SlipData | None:
+    """Gemini อ่านยอดได้ → SlipData ; ล้มหรือไม่เจอยอด → None (ให้ไปใช้ Typhoon) ; ไม่ raise"""
+    try:
+        data = gemini_fields(image_bytes, api_key, model, mime_type)
+    except Exception as exc:
+        log.warning("Gemini ล้มเหลว (%s) ใช้ Typhoon แทน", _describe_error(exc, "Gemini"))
+        return None
+    if data.amount is None:
+        log.info("Gemini ไม่พบยอด ใช้ Typhoon แทน")
+        return None
+    log.info("อ่านสลิปด้วย Gemini ได้: amount=%s", data.amount)
+    return data
+
+
 # =============================================================== regex สำรอง
 # กติกาการเลือกยอด (fallback_amount):
 #   1. ตัวเลขที่เข้าข่าย = มีทศนิยม 2 ตำแหน่ง หรือ ติดสัญลักษณ์เงิน (฿ / THB / บาท / บ.) หรือ อยู่หลัง label ยอดเงิน
@@ -421,18 +466,18 @@ def fallback_amount(text: str) -> float | None:
 
 # =============================================================== pipeline
 
-def _describe_error(exc: BaseException) -> str:
-    """เหตุผลสั้น ๆ ภาษาไทย (ไม่มี API key / ข้อความ OCR)"""
+def _describe_error(exc: BaseException, api: str = "Typhoon") -> str:
+    """เหตุผลสั้น ๆ ภาษาไทย (ไม่มี API key / ข้อความ OCR) ; api = ชื่อบริการที่ล้ม"""
     if isinstance(exc, openai.APITimeoutError):
-        return "หมดเวลารอ Typhoon API"
+        return f"หมดเวลารอ {api} API"
     if isinstance(exc, openai.APIConnectionError):
-        return "เชื่อมต่อ Typhoon API ไม่ได้"
+        return f"เชื่อมต่อ {api} API ไม่ได้"
     if isinstance(exc, openai.AuthenticationError):
         return "API key ไม่ถูกต้อง (HTTP 401)"
     if isinstance(exc, openai.RateLimitError):
-        return "เรียก Typhoon API ถี่เกินไป (HTTP 429)"
+        return f"เรียก {api} API ถี่เกินไป (HTTP 429)"
     if isinstance(exc, openai.APIStatusError):
-        return f"Typhoon API ตอบกลับ HTTP {exc.status_code}"
+        return f"{api} API ตอบกลับ HTTP {exc.status_code}"
     message = str(exc).strip()[:120]
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
@@ -503,13 +548,17 @@ def _read_slip(
 
 def read_slip(
     image_bytes: bytes, api_key: str, model: str, mime_type: str = "image/png", *, copies: int = 1,
-    expect: float | None = None,
+    expect: float | None = None, gemini_key: str = "", gemini_model: str = "",
 ) -> SlipData:
-    """OCR → LLM → (regex สำรอง) ; ไม่ raise เด็ดขาด — ล้มเหลวคืน SlipData(error=...)
+    """(Gemini ถ้ามี key) → Typhoon OCR → LLM → (regex สำรอง) ; ไม่ raise เด็ดขาด — ล้มเหลวคืน SlipData(error=...)
 
     copies > 1 = ยิง OCR สำรอง (ocr_first) ; expect = ยอดที่คาดไว้ — regex เจอยอดนี้พอดีก็ไม่ต้องถาม LLM
     """
     try:
+        if gemini_key:
+            data = _try_gemini(image_bytes, gemini_key, gemini_model, mime_type)
+            if data is not None:
+                return data
         return _read_slip(image_bytes, api_key, model, mime_type, copies, expect)
     except Exception as exc:  # กันทุกกรณีที่ไม่คาดคิด
         reason = _describe_error(exc)
