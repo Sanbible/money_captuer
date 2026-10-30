@@ -49,8 +49,13 @@ async def read_image(file: UploadFile) -> tuple[bytes, str]:
     return data, mime
 
 
-async def read_slip(request: Request, data: bytes, mime: str) -> SlipDraft:
-    """อ่านสลิปด้วย reader ของแอป — Typhoon OCR จำกัด 20 req/min จึงอ่านทีละใบ (app.state.ocr_slot)"""
+async def read_slip(request: Request, data: bytes, mime: str, *, expect: float | None = None) -> SlipDraft:
+    """อ่านสลิปด้วย reader ของแอป — จำนวนที่อ่านพร้อมกันจำกัดด้วย app.state.ocr_slot (Typhoon OCR จำกัด 20 req/min)
+
+    expect = ยอดที่คาดไว้ ส่งให้ reader เฉพาะเมื่อมีค่า
+    """
     state = request.app.state
+    extra = {"expect": expect} if expect is not None else {}
     async with state.ocr_slot:
-        return await asyncio.to_thread(state.reader, data, mime, state.cfg.typhoon_api_key, state.cfg.typhoon_llm_model)
+        return await asyncio.to_thread(state.reader, data, mime, state.cfg.typhoon_api_key,
+                                       state.cfg.typhoon_llm_model, **extra)

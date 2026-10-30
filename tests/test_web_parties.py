@@ -254,7 +254,8 @@ def slip():
 
 @pytest.fixture
 def client(ps, slip):
-    def reader(data, mime, key, model):
+    def reader(data, mime, key, model, **kwargs):
+        slip["kwargs"] = kwargs
         return SlipDraft(amount=slip["amount"], date=None, time=None, receiver=None, bank="",
                          trans_ref=slip["trans_ref"], error=None)
 
@@ -523,6 +524,12 @@ def test_slip_with_exact_amount_marks_paid(client, owed, slip):
     assert resp.status_code == 200, resp.text
     t = resp.json()["transfers"][0]
     assert t["paid"] is True and t["paid_method"] == "slip" and t["can_upload"] is False
+    assert slip["kwargs"] == {"expect": 150.0}  # ส่งยอดที่ต้องโอนไปให้ข้าม LLM ได้ถ้า regex เจอตรง
+
+
+def test_expense_slip_read_has_no_expected_amount(client, slip):
+    client.post("/api/slips/read", files={"file": ("s.png", PNG_SLIP, "image/png")}, headers=HA)
+    assert slip["kwargs"] == {}
 
 
 @pytest.mark.parametrize("amount", [140.0, 150.01, 1500.0])

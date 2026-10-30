@@ -32,6 +32,7 @@ from web.slips import SlipDraft, read_draft
 log = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+OCR_SLOTS = 2
 SUMMARY_MONTHS = 6
 UNCATEGORIZED = "ไม่ระบุหมวด"
 EXPENSE_FIELDS = ("id", "date", "time", "amount", "receiver", "category", "note", "bank", "trans_ref", "source",
@@ -58,7 +59,8 @@ def create_app(
     app = FastAPI(title="Money Capture", docs_url=None, redoc_url=None)
     app.state.store, app.state.auth, app.state.party_store = store, auth, party_store
     app.state.cfg, app.state.reader = cfg, reader
-    app.state.ocr_slot = asyncio.Semaphore(1)  # Typhoon OCR จำกัด 20 req/min — อ่านทีละใบ (web.deps.read_slip)
+    # อ่านสลิปพร้อมกันได้ 2 ใบ (ใบละ ≤ 2 OCR request) — คนที่สองไม่ต้องรอคนแรก แต่ยังไม่เกิน rate limit ของ Typhoon
+    app.state.ocr_slot = asyncio.Semaphore(OCR_SLOTS)
     app.include_router(parties.router)
 
     @app.middleware("http")

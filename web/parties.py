@@ -304,7 +304,7 @@ async def pay_with_slip(me: Me, store: Store, request: Request, party_id: UUID, 
     if t["paid"]:
         raise fail("already_paid")
     data, mime = await read_image(file)
-    draft = await read_slip(request, data, mime)
+    draft = await read_slip(request, data, mime, expect=int(t["amount_satang"]) / 100)
     if draft.amount is None:
         raise HTTPException(422, "อ่านยอดจากสลิปไม่ได้ — ลองรูปที่ชัดกว่านี้ (ไม่ตัด ไม่เบลอ)")
     got, want = round(draft.amount * 100), int(t["amount_satang"])

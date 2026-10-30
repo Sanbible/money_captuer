@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import math
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import slip_qr
 import slip_reader
 from slip_common import normalize_slip_date, normalize_slip_time
+
+OCR_COPIES = 2  # ยิง OCR สำรองอีก 1 request แล้วใช้คำตอบแรก (slip_reader.ocr_first) — คิว Typhoon ช้าแบบสุ่ม
 
 
 @dataclass
@@ -22,10 +25,15 @@ class SlipDraft:
     error: str | None  # เหตุผลเมื่อ OCR ล้ม (None = สำเร็จ)
 
 
-def read_draft(data: bytes, mime: str, api_key: str, model: str) -> SlipDraft:
-    """QR (เลขอ้างอิง/ธนาคาร) → Typhoon OCR/LLM (ยอด/วันที่/ผู้รับ) ; ไม่ raise"""
-    qr = slip_qr.read_slip_qr(data) or {}
-    slip = slip_reader.read_slip(data, api_key, model, mime)
+def read_draft(data: bytes, mime: str, api_key: str, model: str, *, expect: float | None = None) -> SlipDraft:
+    """QR (เลขอ้างอิง/ธนาคาร) คู่ขนานกับ Typhoon OCR/LLM (ยอด/วันที่/ผู้รับ) ; ไม่ raise
+
+    expect = ยอดที่คาดไว้ (ตรวจสลิปการโอนในปาร์ตี้) — ถ้า OCR เห็นยอดนี้พอดีจะข้ามขั้น LLM
+    """
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        qr_job = pool.submit(slip_qr.read_slip_qr, data)  # อ่าน QR ในเครื่องระหว่างรอ Typhoon
+        slip = slip_reader.read_slip(data, api_key, model, mime, copies=OCR_COPIES, expect=expect)
+        qr = qr_job.result() or {}
     amount = slip.amount
     if not isinstance(amount, (int, float)) or not math.isfinite(amount) or amount <= 0:
         amount = None

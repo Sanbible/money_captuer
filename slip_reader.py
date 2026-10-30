@@ -14,6 +14,7 @@ import math
 import re
 import sys
 import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass
 from datetime import date as _date
 from pathlib import Path
@@ -30,6 +31,7 @@ OCR_MODEL = "typhoon-ocr"        # Typhoon OCR 1.5 — rate limit 2 req/s, 20 re
 REQUEST_TIMEOUT = 60.0           # วินาทีต่อ request
 MAX_429_RETRIES = 3              # HTTP 429 → รอ 1s, 2s, 4s แล้วลองใหม่ ครบแล้ว raise
 BACKOFF_BASE_SECONDS = 1.0
+OCR_HEDGE_STAGGER = 0.5          # วินาทีก่อนยิง OCR request สำรอง (ocr_first) — ไม่เกิน 2 req/s
 
 _sleep = time.sleep  # แยกไว้ให้ unit test แทนที่ได้
 
@@ -435,13 +437,53 @@ def _describe_error(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
-def _read_slip(image_bytes: bytes, api_key: str, model: str, mime_type: str) -> SlipData:
+def ocr_first(
+    image_bytes: bytes, api_key: str, mime_type: str = "image/png", *, copies: int = 2,
+    stagger: float = OCR_HEDGE_STAGGER,
+) -> str:
+    """ยิง OCR รูปเดียวกันได้ถึง `copies` request แล้วใช้คำตอบแรกที่สำเร็จ
+
+    เวลารอคิวของ Typhoon สุ่มมาก (วัดได้ 8–60 วิกับรูปเดิม) — request สำรองช่วยตัดเคสที่ติดคิวนาน
+    request ถัดไปเริ่มเมื่อตัวก่อนยังไม่ตอบภายใน `stagger` วินาที หรือล้มไปแล้ว (Typhoon OCR จำกัด 2 req/s)
+    ล้มทุก request → raise error ของ request แรก ; ตัวที่แพ้ปล่อยให้จบเองใน thread (ยกเลิก HTTP กลางทางไม่ได้)
+    """
+    if copies <= 1:
+        return ocr_image(image_bytes, api_key, mime_type)
+    pool = ThreadPoolExecutor(max_workers=copies)
     try:
-        text = ocr_image(image_bytes, api_key, mime_type)
+        started = [pool.submit(ocr_image, image_bytes, api_key, mime_type)]
+        pending = set(started)
+        errors: list[BaseException] = []
+        while pending:
+            more = len(started) < copies
+            done, pending = wait(pending, timeout=stagger if more else None, return_when=FIRST_COMPLETED)
+            for future in done:
+                if future.exception() is None:
+                    log.info("OCR ได้คำตอบจาก request ที่ %d/%d", started.index(future) + 1, len(started))
+                    return future.result()
+                errors.append(future.exception())  # type: ignore[arg-type]
+            if more:
+                future = pool.submit(ocr_image, image_bytes, api_key, mime_type)
+                started.append(future)
+                pending.add(future)
+        raise errors[0]
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+
+def _read_slip(
+    image_bytes: bytes, api_key: str, model: str, mime_type: str, copies: int, expect: float | None
+) -> SlipData:
+    try:
+        text = ocr_first(image_bytes, api_key, mime_type, copies=copies)
     except Exception as exc:
         reason = _describe_error(exc)
         log.warning("OCR ล้มเหลว: %s", reason)
         return SlipData(error=f"OCR ล้มเหลว: {reason}")
+
+    if expect is not None and fallback_amount(text) == expect:
+        log.info("ยอดในสลิปตรงกับยอดที่คาดไว้ ข้าม LLM")  # ยอดตรง = ผ่าน ไม่ต้องรอ LLM อีก ~1 วิ
+        return SlipData(amount=expect)
 
     try:
         data = extract_fields(text, api_key, model)
@@ -459,10 +501,16 @@ def _read_slip(image_bytes: bytes, api_key: str, model: str, mime_type: str) -> 
     return data
 
 
-def read_slip(image_bytes: bytes, api_key: str, model: str, mime_type: str = "image/png") -> SlipData:
-    """OCR → LLM → (regex สำรอง) ; ไม่ raise เด็ดขาด — ล้มเหลวคืน SlipData(error=...)"""
+def read_slip(
+    image_bytes: bytes, api_key: str, model: str, mime_type: str = "image/png", *, copies: int = 1,
+    expect: float | None = None,
+) -> SlipData:
+    """OCR → LLM → (regex สำรอง) ; ไม่ raise เด็ดขาด — ล้มเหลวคืน SlipData(error=...)
+
+    copies > 1 = ยิง OCR สำรอง (ocr_first) ; expect = ยอดที่คาดไว้ — regex เจอยอดนี้พอดีก็ไม่ต้องถาม LLM
+    """
     try:
-        return _read_slip(image_bytes, api_key, model, mime_type)
+        return _read_slip(image_bytes, api_key, model, mime_type, copies, expect)
     except Exception as exc:  # กันทุกกรณีที่ไม่คาดคิด
         reason = _describe_error(exc)
         log.error("อ่านสลิปล้มเหลว: %s", reason)

@@ -421,6 +421,79 @@ def test_read_slip_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.amount is None and result.error
 
 
+def test_read_slip_skips_llm_when_regex_finds_expected_amount(fake) -> None:
+    client = fake(OCR_TEXT)  # มีแค่คำตอบ OCR — ถ้าเรียก LLM จะได้ error
+    result = slip_reader.read_slip(_png(10, 10), API_KEY, MODEL, expect=85.0)
+    assert result == SlipData(amount=85.0)
+    assert len(client.calls) == 1
+
+
+def test_read_slip_expect_mismatch_still_asks_llm(fake) -> None:
+    client = fake(OCR_TEXT, '{"amount": 85, "date": null, "time": null, "receiver": null}')
+    result = slip_reader.read_slip(_png(10, 10), API_KEY, MODEL, expect=90.0)
+    assert result.amount == 85.0
+    assert [c["model"] for c in client.calls] == ["typhoon-ocr", MODEL]
+
+
+# ---------------------------------------------------------------- ยิง OCR ซ้ำ ใช้คำตอบแรก (hedged request)
+
+@pytest.fixture
+def ocr_calls(monkeypatch: pytest.MonkeyPatch):
+    """แทน ocr_image ด้วยลำดับพฤติกรรม: "slow" = ค้างจนเทสต์จบ, Exception = raise, str = คืนข้อความ"""
+    import threading
+
+    release = threading.Event()
+    calls: list[int] = []
+
+    def install(*behaviours: object) -> list[int]:
+        def fake_ocr(image_bytes: bytes, api_key: str, mime_type: str = "image/png") -> str:
+            calls.append(len(calls))
+            behaviour = behaviours[len(calls) - 1]
+            if behaviour == "slow":
+                release.wait(5)
+                return "ช้า"
+            if isinstance(behaviour, BaseException):
+                raise behaviour
+            return behaviour  # type: ignore[return-value]
+
+        monkeypatch.setattr(slip_reader, "ocr_image", fake_ocr)
+        return calls
+
+    yield install
+    release.set()
+
+
+def test_ocr_first_returns_fastest_copy(ocr_calls) -> None:
+    calls = ocr_calls("slow", "เร็ว")
+    assert slip_reader.ocr_first(b"x", API_KEY, copies=2, stagger=0.01) == "เร็ว"
+    assert len(calls) == 2
+
+
+def test_ocr_first_no_second_copy_when_first_is_quick(ocr_calls) -> None:
+    calls = ocr_calls("ตอบไว")
+    assert slip_reader.ocr_first(b"x", API_KEY, copies=2, stagger=1) == "ตอบไว"
+    assert len(calls) == 1
+
+
+def test_ocr_first_uses_other_copy_when_one_fails(ocr_calls) -> None:
+    calls = ocr_calls(RuntimeError("ล้ม"), "สำรอง")
+    assert slip_reader.ocr_first(b"x", API_KEY, copies=2, stagger=1) == "สำรอง"
+    assert len(calls) == 2
+
+
+def test_ocr_first_raises_first_error_when_all_fail(ocr_calls) -> None:
+    ocr_calls(RuntimeError("แรก"), RuntimeError("สอง"))
+    with pytest.raises(RuntimeError, match="แรก"):
+        slip_reader.ocr_first(b"x", API_KEY, copies=2, stagger=0.01)
+
+
+def test_read_slip_with_copies_uses_hedged_ocr(fake, ocr_calls) -> None:
+    ocr_calls("slow", OCR_TEXT)
+    fake('{"amount": 85, "date": null, "time": null, "receiver": null}')  # เหลือแค่ LLM
+    result = slip_reader.read_slip(_png(10, 10), API_KEY, MODEL, copies=2)
+    assert result.amount == 85.0 and result.error is None
+
+
 def test_read_slip_does_not_log_ocr_text_or_api_key(fake, caplog) -> None:
     caplog.set_level(logging.DEBUG)
     fake(OCR_TEXT, "garbage")
