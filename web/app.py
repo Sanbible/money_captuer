@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Annotated, Any, Callable
 from uuid import UUID
 
-from fastapi import FastAPI, File, HTTPException, Query, Response, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -26,14 +26,12 @@ from party_store import PartyStore
 from store import ExpenseStore, NewExpense
 from web import parties
 from web.auth import SupabaseAuth
-from web.deps import Me, current_user  # noqa: F401 — current_user ใช้ในเทสต์/เอกสาร
+from web.deps import MAX_UPLOAD_BYTES, Me, current_user, read_image, read_slip  # noqa: F401 — current_user/MAX_UPLOAD_BYTES ใช้ในเทสต์
 from web.slips import SlipDraft, read_draft
 
 log = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-IMAGE_MIME_TYPES = {"image/png": "image/png", "image/jpeg": "image/jpeg", "image/jpg": "image/jpeg"}
 SUMMARY_MONTHS = 6
 UNCATEGORIZED = "ไม่ระบุหมวด"
 EXPENSE_FIELDS = ("id", "date", "time", "amount", "receiver", "category", "note", "bank", "trans_ref", "source",
@@ -59,6 +57,8 @@ def create_app(
     """store / auth / reader / party_store ส่งเข้ามาเพื่อให้เทสต์ใช้ fake ได้"""
     app = FastAPI(title="Money Capture", docs_url=None, redoc_url=None)
     app.state.store, app.state.auth, app.state.party_store = store, auth, party_store
+    app.state.cfg, app.state.reader = cfg, reader
+    app.state.ocr_slot = asyncio.Semaphore(1)  # Typhoon OCR จำกัด 20 req/min — อ่านทีละใบ (web.deps.read_slip)
     app.include_router(parties.router)
 
     @app.middleware("http")
@@ -69,7 +69,6 @@ def create_app(
         if not request.url.path.startswith("/api/"):
             response.headers.setdefault("Cache-Control", "no-cache")
         return response
-    ocr_slot = asyncio.Semaphore(1)  # Typhoon OCR จำกัด 20 req/min — อ่านทีละใบเหมือนบอท
 
     # ---------- pages ----------
 
@@ -90,15 +89,9 @@ def create_app(
     # ---------- slips ----------
 
     @app.post("/api/slips/read")
-    async def read_slip(me: Me, file: Annotated[UploadFile, File()]) -> dict:
-        mime = IMAGE_MIME_TYPES.get((file.content_type or "").lower())
-        if mime is None:
-            raise HTTPException(415, "รองรับเฉพาะรูป PNG หรือ JPEG")
-        data = await file.read(MAX_UPLOAD_BYTES + 1)
-        if len(data) > MAX_UPLOAD_BYTES:
-            raise HTTPException(413, "ไฟล์ใหญ่เกิน 10 MB")
-        async with ocr_slot:
-            draft = await asyncio.to_thread(reader, data, mime, cfg.typhoon_api_key, cfg.typhoon_llm_model)
+    async def read_slip_draft(me: Me, request: Request, file: Annotated[UploadFile, File()]) -> dict:
+        data, mime = await read_image(file)
+        draft = await read_slip(request, data, mime)
         duplicate = False
         if draft.trans_ref:
             duplicate = await asyncio.to_thread(

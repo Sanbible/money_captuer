@@ -140,6 +140,9 @@ def test_transfers_in_seq_order():
         (lambda s: s.delete_expense(EXPENSE, U1), "party_delete_expense", {"p_expense": EXPENSE, "p_actor": U1}),
         (lambda s: s.close(PARTY, U1), "party_close", {"p_party": PARTY, "p_actor": U1}),
         (lambda s: s.toggle_paid(EXPENSE, U1), "party_toggle_paid", {"p_transfer": EXPENSE, "p_actor": U1}),
+        (lambda s: s.pay_with_slip(EXPENSE, U1, amount_satang=15000, trans_ref="R1", image_sha256="ab"),
+         "party_pay_with_slip",
+         {"p_transfer": EXPENSE, "p_actor": U1, "p_amount": 15000, "p_trans_ref": "R1", "p_sha": "ab"}),
     ],
 )
 def test_rpc_calls_return_status(call, rpc, expected_body):

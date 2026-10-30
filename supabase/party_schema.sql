@@ -85,6 +85,17 @@ create table if not exists public.party_transfers (
 
 create index if not exists party_transfers_party on public.party_transfers (party_id, seq);
 
+-- ยืนยันการโอน: 'slip' = คนโอนแนบสลิปที่ยอดตรง (ระบบตรวจ) ; 'receiver' = คนรับกดยืนยันเอง
+alter table public.party_transfers
+  add column if not exists paid_method text check (paid_method in ('slip', 'receiver')),
+  add column if not exists slip_ref    text,
+  add column if not exists slip_sha256 text;
+-- สลิปหนึ่งใบใช้ยืนยันได้รายการเดียว (ทุกปาร์ตี้)
+create unique index if not exists party_transfers_slip_ref
+  on public.party_transfers (slip_ref) where slip_ref is not null;
+create unique index if not exists party_transfers_slip_sha
+  on public.party_transfers (slip_sha256) where slip_sha256 is not null;
+
 -- ไม่มี policy: browser เข้าไม่ได้ เว็บใช้ service role ผ่าน API ที่ตรวจสิทธิ์แล้ว
 alter table public.parties enable row level security;
 alter table public.party_members enable row level security;
@@ -269,24 +280,27 @@ begin
   return query select * from party_transfers where party_id = p_party order by seq;
 end $$;
 
--- สลับสถานะ "โอนแล้ว" (คนโอนหรือคนรับ) ; คืน 'settled' เฉพาะครั้งที่ทำให้ปาร์ตี้เคลียร์ครบ
+-- คนรับกดยืนยันว่าได้เงินแล้ว / กดซ้ำเพื่อยกเลิก (ยืนยันด้วยสลิปแล้วยกเลิกไม่ได้)
+-- คืน 'settled' เฉพาะครั้งที่ทำให้ปาร์ตี้เคลียร์ครบ
 create or replace function public.party_toggle_paid(p_transfer uuid, p_actor uuid)
 returns text language plpgsql security definer set search_path = public as $$
 declare
   v_party  uuid;
-  v_from   uuid;
   v_to     uuid;
   v_paid   boolean;
+  v_method text;
   v_status text;
 begin
-  select party_id, from_id, to_id into v_party, v_from, v_to from party_transfers where id = p_transfer;
+  select party_id, to_id into v_party, v_to from party_transfers where id = p_transfer;
   if not found then return 'not_found'; end if;
   select status into v_status from parties where id = v_party for update;
   if v_status <> 'closed' then return 'locked'; end if;
-  if p_actor <> v_from and p_actor <> v_to then return 'forbidden'; end if;
-  select paid into v_paid from party_transfers where id = p_transfer;
+  if p_actor <> v_to then return 'forbidden'; end if;
+  select paid, paid_method into v_paid, v_method from party_transfers where id = p_transfer;
+  if v_method = 'slip' then return 'verified'; end if;
   update party_transfers
   set paid = not v_paid,
+      paid_method = case when v_paid then null else 'receiver' end,
       paid_by = case when v_paid then null else p_actor end,
       paid_at = case when v_paid then null else now() end
   where id = p_transfer;
@@ -295,6 +309,40 @@ begin
     return 'settled';
   end if;
   return case when v_paid then 'unpaid' else 'paid' end;
+end $$;
+
+-- คนโอนยืนยันด้วยสลิป: server อ่านยอดจากสลิปแล้วส่งมา ต้องเท่ายอดโอนเป๊ะ ; สลิปเดิมใช้ซ้ำไม่ได้
+create or replace function public.party_pay_with_slip(p_transfer uuid, p_actor uuid, p_amount bigint,
+  p_trans_ref text, p_sha text)
+returns text language plpgsql security definer set search_path = public as $$
+declare
+  v_party  uuid;
+  v_from   uuid;
+  v_amount bigint;
+  v_paid   boolean;
+  v_status text;
+begin
+  select party_id into v_party from party_transfers where id = p_transfer;
+  if not found then return 'not_found'; end if;
+  select status into v_status from parties where id = v_party for update;
+  if v_status <> 'closed' then return 'locked'; end if;
+  select from_id, amount_satang, paid into v_from, v_amount, v_paid from party_transfers where id = p_transfer;
+  if p_actor <> v_from then return 'forbidden'; end if;
+  if v_paid then return 'already_paid'; end if;
+  if p_amount is distinct from v_amount then return 'mismatch'; end if;
+  begin
+    update party_transfers
+    set paid = true, paid_method = 'slip', paid_by = p_actor, paid_at = now(),
+        slip_ref = nullif(p_trans_ref, ''), slip_sha256 = nullif(p_sha, '')
+    where id = p_transfer;
+  exception when unique_violation then
+    return 'duplicate';
+  end;
+  if not exists (select 1 from party_transfers where party_id = v_party and not paid) then
+    update parties set status = 'settled', settled_at = now() where id = v_party;
+    return 'settled';
+  end if;
+  return 'paid';
 end $$;
 
 do $$
@@ -306,7 +354,8 @@ begin
     'party_remove_member(uuid, uuid, uuid)', 'party_valid_split(uuid, bigint, uuid, jsonb)',
     'party_add_expense(uuid, uuid, bigint, uuid, text, text, text, text, jsonb)',
     'party_update_expense(uuid, uuid, bigint, uuid, text, jsonb)', 'party_delete_expense(uuid, uuid)',
-    'party_close(uuid, uuid)', 'party_create_transfers(uuid, jsonb)', 'party_toggle_paid(uuid, uuid)'
+    'party_close(uuid, uuid)', 'party_create_transfers(uuid, jsonb)', 'party_toggle_paid(uuid, uuid)',
+    'party_pay_with_slip(uuid, uuid, bigint, text, text)'
   ] loop
     execute format('revoke execute on function public.%s from public, anon, authenticated', f);
     execute format('grant execute on function public.%s to service_role', f);

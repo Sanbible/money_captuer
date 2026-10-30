@@ -160,6 +160,8 @@ dialog::backdrop { background: rgb(0 0 0 / 45%); }
 .transfer { display: flex; align-items: center; gap: 12px; justify-content: space-between; flex-wrap: wrap;
             padding: 10px 0; border-bottom: 1px solid var(--line); }
 .transfer-line { display: flex; gap: 12px; flex-wrap: wrap; }
+.transfer .row-actions { align-items: center; flex-wrap: wrap; gap: 8px; }
+.transfer .notice { flex-basis: 100%; }
 .expense { padding: 10px 0; border-bottom: 1px solid var(--line); }
 .expense-head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
 .row-actions { margin-left: auto; display: flex; gap: 4px; }

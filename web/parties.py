@@ -7,15 +7,16 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
-from party_math import Expense, balances, parse_baht, settle, split
+from party_math import Expense, balances, format_satang, parse_baht, settle, split
 from party_store import PartyStore
-from web.deps import Me
+from web.deps import Me, read_image, read_slip
 
 router = APIRouter(prefix="/api/parties")
 
@@ -30,6 +31,9 @@ STATUS = {
     "host": (409, "host ออกจากปาร์ตี้หรือถูกเตะไม่ได้"),
     "duplicate": (409, "สลิปนี้ถูกบันทึกในปาร์ตี้แล้ว"),
     "locked": (409, "ปาร์ตี้นี้เคลียร์ครบแล้ว"),
+    "already_paid": (409, "รายการนี้โอนแล้ว"),
+    "verified": (409, "รายการนี้ยืนยันด้วยสลิปแล้ว ยกเลิกไม่ได้"),
+    "mismatch": (422, "ยอดในสลิปไม่ตรงกับยอดที่ต้องโอน"),
     "forbidden": (403, "คุณไม่มีสิทธิ์ทำรายการนี้"),
     "invalid": (422, "ข้อมูลไม่ถูกต้อง (คนจ่าย/ผู้มีส่วนต้องเป็นสมาชิก และผลรวมต้องเท่ากับยอด)"),
     "not_member": (404, NOT_FOUND_TEXT),
@@ -114,12 +118,18 @@ def party_detail(party: dict, members: list[dict], rows: list[dict], transfers: 
         ],
         "balances": [{"user_id": u, "paid": b.paid, "owed": b.owed, "net": b.net} for u, b in bal.items()],
         "total_satang": sum(int(r["amount_satang"]) for r in rows),
-        "transfers": [
-            {"id": t["id"], "seq": t["seq"], "from_id": t["from_id"], "to_id": t["to_id"],
-             "amount_satang": int(t["amount_satang"]), "paid": bool(t["paid"]),
-             "can_mark": party["status"] == "closed" and me_id in (t["from_id"], t["to_id"])}
-            for t in transfers
-        ],
+        "transfers": [transfer_view(t, party["status"] == "closed", me_id) for t in transfers],
+    }
+
+
+def transfer_view(t: dict, closed: bool, me_id: str) -> dict:
+    """คนโอนแนบสลิปได้ (ตอนยังไม่โอน) ; คนรับกดยืนยัน/ยกเลิกได้ ยกเว้นยืนยันด้วยสลิปแล้ว"""
+    paid, method = bool(t["paid"]), t.get("paid_method")
+    return {
+        "id": t["id"], "seq": t["seq"], "from_id": t["from_id"], "to_id": t["to_id"],
+        "amount_satang": int(t["amount_satang"]), "paid": paid, "paid_method": method if paid else None,
+        "can_upload": closed and not paid and me_id == t["from_id"],
+        "can_confirm": closed and method != "slip" and me_id == t["to_id"],
     }
 
 
@@ -262,12 +272,46 @@ async def end_party(me: Me, store: Store, party_id: UUID) -> dict:
     return await detail_of(store, str(party_id), me.id)
 
 
+async def load_transfer(store: PartyStore, party_id: UUID, transfer_id: UUID) -> dict:
+    t = next((t for t in await run(store.transfers, str(party_id)) if t["id"] == str(transfer_id)), None)
+    if t is None:
+        raise HTTPException(404, "ไม่พบรายการโอนนี้")
+    return t
+
+
 @router.post("/{party_id}/transfers/{transfer_id}/paid")
 async def toggle_paid(me: Me, store: Store, party_id: UUID, transfer_id: UUID) -> dict:
+    """คนรับยืนยันว่าได้เงินแล้ว (เช่น จ่ายเงินสด) / กดซ้ำเพื่อยกเลิก"""
     await load_member_party(store, party_id, me.id)
-    if str(transfer_id) not in {t["id"] for t in await run(store.transfers, str(party_id))}:
-        raise HTTPException(404, "ไม่พบรายการโอนนี้")
+    await load_transfer(store, party_id, transfer_id)
     status = await run(store.toggle_paid, str(transfer_id), me.id)
     if status not in ("paid", "unpaid", "settled"):
-        raise fail(status, "เฉพาะคนโอนหรือคนรับของรายการนี้เท่านั้นที่กดได้" if status == "forbidden" else None)
+        raise fail(status, "เฉพาะคนรับเงินเท่านั้นที่กดยืนยันได้ — คนโอนให้แนบสลิป" if status == "forbidden" else None)
+    return await detail_of(store, str(party_id), me.id)
+
+
+@router.post("/{party_id}/transfers/{transfer_id}/slip")
+async def pay_with_slip(me: Me, store: Store, request: Request, party_id: UUID, transfer_id: UUID,
+                        file: Annotated[UploadFile, File()]) -> dict:
+    """คนโอนแนบสลิป → server อ่านยอดเอง (ไม่เชื่อยอดจาก browser) → ต้องตรงเป๊ะถึงจะนับว่าโอนแล้ว"""
+    party, _ = await load_member_party(store, party_id, me.id)
+    t = await load_transfer(store, party_id, transfer_id)
+    # ตรวจสิทธิ์ก่อนอ่านสลิป จะได้ไม่เปลือง OCR (SQL ตรวจซ้ำอีกรอบแบบล็อกแถว)
+    if party["status"] != "closed":
+        raise fail("locked")
+    if me.id != t["from_id"]:
+        raise HTTPException(403, "เฉพาะคนที่ต้องโอนเท่านั้นที่แนบสลิปได้")
+    if t["paid"]:
+        raise fail("already_paid")
+    data, mime = await read_image(file)
+    draft = await read_slip(request, data, mime)
+    if draft.amount is None:
+        raise HTTPException(422, "อ่านยอดจากสลิปไม่ได้ — ลองรูปที่ชัดกว่านี้ (ไม่ตัด ไม่เบลอ)")
+    got, want = round(draft.amount * 100), int(t["amount_satang"])
+    if got != want:
+        raise HTTPException(422, f"ยอดในสลิป ฿{format_satang(got)} ไม่ตรงกับที่ต้องโอน ฿{format_satang(want)} — แนบสลิปใหม่")
+    status = await run(store.pay_with_slip, str(transfer_id), me.id, amount_satang=got,
+                       trans_ref=draft.trans_ref, image_sha256=hashlib.sha256(data).hexdigest())
+    if status not in ("paid", "settled"):
+        raise fail(status, "สลิปนี้เคยใช้ยืนยันการโอนไปแล้ว" if status == "duplicate" else None)
     return await detail_of(store, str(party_id), me.id)

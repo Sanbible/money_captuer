@@ -130,7 +130,16 @@ class PartyStore:
         return self._rpc("party_create_transfers", p_party=party_id, p_transfers=items)
 
     def toggle_paid(self, transfer_id: str, actor_id: str) -> str:
+        """คนรับยืนยัน/ยกเลิก — คืน paid | unpaid | settled | verified | forbidden | locked | not_found"""
         return self._rpc("party_toggle_paid", p_transfer=transfer_id, p_actor=actor_id)
+
+    def pay_with_slip(
+        self, transfer_id: str, actor_id: str, *, amount_satang: int, trans_ref: str | None, image_sha256: str
+    ) -> str:
+        """คนโอนยืนยันด้วยสลิป (ยอดที่อ่านได้ต้องเท่ายอดโอน) — คืน paid | settled | mismatch | duplicate |
+        already_paid | forbidden | locked | not_found"""
+        return self._rpc("party_pay_with_slip", p_transfer=transfer_id, p_actor=actor_id, p_amount=amount_satang,
+                         p_trans_ref=trans_ref, p_sha=image_sha256)
 
     # ------------------------------------------------------------------ internals
 
@@ -245,12 +254,26 @@ def _smoke_test() -> int:
         first = store.create_transfers(pid, transfers)
         check("จำนวนรายการโอน", len(first), 2)
         check("สร้างซ้ำได้ชุดเดิม", [t["id"] for t in store.create_transfers(pid, transfers)], [t["id"] for t in first])
-        check("คนนอกกดโอนแล้ว", store.toggle_paid(first[0]["id"], users[5]), "forbidden")
-        check("กดโอนแล้ว", store.toggle_paid(first[0]["id"], first[0]["from_id"]), "paid")
-        check("กดซ้ำเพื่อยกเลิก", store.toggle_paid(first[0]["id"], first[0]["to_id"]), "unpaid")
-        check("กดอีกครั้ง", store.toggle_paid(first[0]["id"], first[0]["from_id"]), "paid")
-        check("รายการสุดท้าย", store.toggle_paid(first[1]["id"], first[1]["to_id"]), "settled")
-        check("หลัง settled", store.toggle_paid(first[1]["id"], first[1]["to_id"]), "locked")
+        t0, t1 = first
+        sha = secrets.token_hex(32)  # สลิปปลอมที่ไม่ซ้ำกับของจริง
+        check("คนนอกกดโอนแล้ว", store.toggle_paid(t0["id"], users[5]), "forbidden")
+        check("คนโอนกดเองไม่ได้", store.toggle_paid(t0["id"], t0["from_id"]), "forbidden")
+        check("คนรับยืนยัน", store.toggle_paid(t0["id"], t0["to_id"]), "paid")
+        check("คนรับกดซ้ำเพื่อยกเลิก", store.toggle_paid(t0["id"], t0["to_id"]), "unpaid")
+        slip = {"trans_ref": None, "image_sha256": sha}
+        check("สลิปจากคนรับ", store.pay_with_slip(t0["id"], t0["to_id"], amount_satang=t0["amount_satang"],
+                                                  **slip), "forbidden")
+        check("สลิปยอดไม่ตรง", store.pay_with_slip(t0["id"], t0["from_id"], amount_satang=t0["amount_satang"] + 1,
+                                                   **slip), "mismatch")
+        check("สลิปยอดตรง", store.pay_with_slip(t0["id"], t0["from_id"], amount_satang=t0["amount_satang"],
+                                                **slip), "paid")
+        check("แนบซ้ำ", store.pay_with_slip(t0["id"], t0["from_id"], amount_satang=t0["amount_satang"],
+                                            **slip), "already_paid")
+        check("คนรับยกเลิกรายการที่ตรวจสลิปแล้ว", store.toggle_paid(t0["id"], t0["to_id"]), "verified")
+        check("สลิปเดิมกับอีกรายการ", store.pay_with_slip(t1["id"], t1["from_id"], amount_satang=t1["amount_satang"],
+                                                          **slip), "duplicate")
+        check("รายการสุดท้าย", store.toggle_paid(t1["id"], t1["to_id"]), "settled")
+        check("หลัง settled", store.toggle_paid(t1["id"], t1["to_id"]), "locked")
         check("สถานะ", store.get_party(pid)["status"], "settled")
     finally:
         store._request("DELETE", "parties", params=[("id", f"eq.{pid}")]).raise_for_status()

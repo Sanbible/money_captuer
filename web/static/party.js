@@ -79,24 +79,64 @@
     const status = d.party.status;
     $("settle-card").classList.toggle("hidden", status === "open");
     if (status === "open") return;
-    $("settle-title").textContent = status === "settled" ? "✅ เคลียร์ครบแล้ว" : "สรุปการโอน — กดเมื่อโอนแล้ว";
+    $("settle-title").textContent = status === "settled" ? "✅ เคลียร์ครบแล้ว"
+      : "สรุปการโอน — คนโอนแนบสลิป ระบบตรวจยอดให้";
     if (!d.transfers.length) {
       $("transfers").replaceChildren(el("p", { className: "muted", textContent: "ไม่มีใครต้องโอน 🎉" }));
       return;
     }
-    $("transfers").replaceChildren(...d.transfers.map((t) => {
-      const line = el("div", { className: "transfer-line" },
-        el("span", { textContent: `${nameOf(t.from_id)} → ${nameOf(t.to_id)}` }),
-        el("strong", { textContent: sb(t.amount_satang) }));
-      const btn = el("button", {
-        className: `btn btn-small ${t.paid ? "btn-success" : ""}`, type: "button",
-        textContent: t.paid ? "✅ โอนแล้ว" : "กดเมื่อโอนแล้ว", disabled: !t.can_mark,
-        title: t.can_mark ? "" : "เฉพาะคนโอนหรือคนรับเท่านั้น",
+    $("transfers").replaceChildren(...d.transfers.map(transferRow));
+  }
+
+  const PAID_TEXT = { slip: "✅ ตรวจสลิปแล้ว", receiver: "✅ ผู้รับยืนยันแล้ว" };
+
+  function transferRow(t) {
+    const line = el("div", { className: "transfer-line" },
+      el("span", { textContent: `${nameOf(t.from_id)} → ${nameOf(t.to_id)}` }),
+      el("strong", { textContent: sb(t.amount_satang) }));
+    const actions = el("div", { className: "row-actions" });
+    const note = el("p", { className: "notice hidden" });
+    const say = (kind, text) => {
+      note.className = `notice notice-${kind}`;
+      note.textContent = text;
+    };
+    if (t.paid) actions.append(el("span", { className: "badge badge-open", textContent: PAID_TEXT[t.paid_method] || "✅ โอนแล้ว" }));
+    if (t.can_upload) {
+      const file = el("input", { type: "file", accept: "image/png,image/jpeg", className: "hidden" });
+      const btn = el("button", { className: "btn btn-small btn-primary", type: "button", textContent: "แนบสลิปการโอน" });
+      btn.addEventListener("click", () => file.click());
+      file.addEventListener("change", async () => {
+        const picked = file.files[0];
+        file.value = "";
+        if (!picked) return;
+        if (!["image/png", "image/jpeg"].includes(picked.type) || picked.size > 10 * 1024 * 1024) {
+          say("error", "รองรับเฉพาะรูป PNG/JPEG ไม่เกิน 10 MB");
+          return;
+        }
+        const form = new FormData();
+        form.append("file", picked);
+        btn.disabled = true;
+        say("warn", "กำลังตรวจยอดในสลิป… อาจใช้เวลาสักครู่");
+        try {
+          render(await MC.api(`/api/parties/${partyId}/transfers/${t.id}/slip`, { method: "POST", body: form }));
+        } catch (e) {
+          say("error", e.message);
+          btn.disabled = false;
+        }
       });
+      actions.append(btn, file);
+    }
+    if (t.can_confirm) {
+      const btn = el("button", { className: "btn btn-small", type: "button",
+        textContent: t.paid ? "ยกเลิกการยืนยัน" : "ได้รับเงินแล้ว (เช่น เงินสด)" });
       btn.addEventListener("click", () => act(btn, () =>
         MC.api(`/api/parties/${partyId}/transfers/${t.id}/paid`, { method: "POST" }).then(render)));
-      return el("div", { className: "transfer" }, line, btn);
-    }));
+      actions.append(btn);
+    }
+    if (!t.paid && !t.can_upload && !t.can_confirm) {
+      actions.append(el("span", { className: "muted small", textContent: `รอ ${nameOf(t.from_id)} แนบสลิป` }));
+    }
+    return el("div", { className: "transfer" }, line, actions, note);
   }
 
   function renderBalances(d) {

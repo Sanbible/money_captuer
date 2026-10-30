@@ -185,26 +185,57 @@ class FakePartyStore:
         if p["status"] == "closed" and not self.transfers_.get(pid):
             self.transfers_[pid] = [
                 {"id": str(uuid.uuid4()), "seq": i, "from_id": t.from_id, "to_id": t.to_id,
-                 "amount_satang": t.amount, "paid": False} for i, t in enumerate(transfers, 1)
+                 "amount_satang": t.amount, "paid": False, "paid_method": None, "slip_ref": None,
+                 "slip_sha256": None} for i, t in enumerate(transfers, 1)
             ]
             if not transfers:
                 p["status"] = "settled"
         return self.transfers(pid)
 
+    def _find(self, tid):
+        return next(((pid, t) for pid, ts in self.transfers_.items() for t in ts if t["id"] == tid), (None, None))
+
+    def _mark(self, pid, t, method):
+        t.update(paid=True, paid_method=method)
+        if all(x["paid"] for x in self.transfers_[pid]):
+            self.parties[pid]["status"] = "settled"
+            return "settled"
+        return "paid"
+
     def toggle_paid(self, tid, actor):
-        for pid, ts in self.transfers_.items():
-            for t in ts:
-                if t["id"] == tid:
-                    if self.parties[pid]["status"] != "closed":
-                        return "locked"
-                    if actor not in (t["from_id"], t["to_id"]):
-                        return "forbidden"
-                    t["paid"] = not t["paid"]
-                    if t["paid"] and all(x["paid"] for x in ts):
-                        self.parties[pid]["status"] = "settled"
-                        return "settled"
-                    return "paid" if t["paid"] else "unpaid"
-        return "not_found"
+        """เฉพาะคนรับ ; ยืนยันด้วยสลิปแล้วยกเลิกไม่ได้"""
+        pid, t = self._find(tid)
+        if t is None:
+            return "not_found"
+        if self.parties[pid]["status"] != "closed":
+            return "locked"
+        if actor != t["to_id"]:
+            return "forbidden"
+        if t["paid_method"] == "slip":
+            return "verified"
+        if t["paid"]:
+            t.update(paid=False, paid_method=None)
+            return "unpaid"
+        return self._mark(pid, t, "receiver")
+
+    def pay_with_slip(self, tid, actor, *, amount_satang, trans_ref, image_sha256):
+        pid, t = self._find(tid)
+        if t is None:
+            return "not_found"
+        if self.parties[pid]["status"] != "closed":
+            return "locked"
+        if actor != t["from_id"]:
+            return "forbidden"
+        if t["paid"]:
+            return "already_paid"
+        if amount_satang != t["amount_satang"]:
+            return "mismatch"
+        for ts in self.transfers_.values():
+            for x in ts:
+                if (trans_ref and x["slip_ref"] == trans_ref) or x["slip_sha256"] == image_sha256:
+                    return "duplicate"
+        t.update(slip_ref=trans_ref, slip_sha256=image_sha256)
+        return self._mark(pid, t, "slip")
 
 
 @pytest.fixture
@@ -212,10 +243,20 @@ def ps():
     return FakePartyStore()
 
 
+PNG_SLIP = b"\x89PNG\r\n\x1a\n" + b"slip" * 16
+
+
 @pytest.fixture
-def client(ps):
+def slip():
+    """ค่าที่ reader ปลอมจะ "อ่านได้" จากสลิป — เทสต์แก้ได้"""
+    return {"amount": 104.0, "trans_ref": "REF9"}
+
+
+@pytest.fixture
+def client(ps, slip):
     def reader(data, mime, key, model):
-        return SlipDraft(amount=104.0, date=None, time=None, receiver=None, bank="", trans_ref="REF9", error=None)
+        return SlipDraft(amount=slip["amount"], date=None, time=None, receiver=None, bank="",
+                         trans_ref=slip["trans_ref"], error=None)
 
     app = create_app(CFG, store=FakeExpenseStore(), auth=FakeAuth(), reader=reader, party_store=ps)
     return TestClient(app)
@@ -430,21 +471,108 @@ def test_end_with_nothing_owed_settles(client, trio):
     assert d["party"]["status"] == "settled" and d["transfers"] == []
 
 
-def test_paid_toggle_and_settled(client, trio):
+HEADERS_OF = {A.id: HA, B.id: HB, C.id: HC}
+
+
+@pytest.fixture
+def owed(client, trio):
+    """ปิดปาร์ตี้แล้ว: บี → เอ ฿150 และ ซี → เอ ฿150"""
     add(client, trio, amount="300", payer_id=A.id, participants=[B.id, C.id])
     d = client.post(f"/api/parties/{trio['id']}/end", headers=HA).json()
-    t1, t2 = d["transfers"]
-    url = f"/api/parties/{trio['id']}/transfers/{{}}/paid"
-    stranger = t2["from_id"]  # คนที่ไม่เกี่ยวกับรายการแรก
-    assert client.post(url.format(t1["id"]), headers=HC if stranger == C.id else HB).status_code == 403
-    me_t1 = HB if t1["from_id"] == B.id else HC
-    d = client.post(url.format(t1["id"]), headers=me_t1).json()
-    assert d["transfers"][0]["paid"] is True and d["party"]["status"] == "closed"
-    me_t2 = HB if t2["from_id"] == B.id else HC
-    d = client.post(url.format(t2["id"]), headers=me_t2).json()
+    assert [(t["to_id"], t["amount_satang"]) for t in d["transfers"]] == [(A.id, 15000), (A.id, 15000)]
+    return d
+
+
+def paid_url(d, t):
+    return f"/api/parties/{d['party']['id']}/transfers/{t['id']}/paid"
+
+
+def upload(client, d, t, headers, data=PNG_SLIP, mime="image/png"):
+    return client.post(f"/api/parties/{d['party']['id']}/transfers/{t['id']}/slip",
+                       files={"file": ("slip.png", data, mime)}, headers=headers)
+
+
+def test_transfer_flags_in_detail(client, owed):
+    t1 = owed["transfers"][0]
+    payer = HEADERS_OF[t1["from_id"]]
+    mine = client.get(f"/api/parties/{owed['party']['id']}", headers=payer).json()["transfers"][0]
+    assert mine["can_upload"] is True and mine["can_confirm"] is False and mine["paid_method"] is None
+    theirs = client.get(f"/api/parties/{owed['party']['id']}", headers=HA).json()["transfers"][0]
+    assert theirs["can_upload"] is False and theirs["can_confirm"] is True
+
+
+def test_only_receiver_confirms_and_settles(client, owed):
+    t1, t2 = owed["transfers"]
+    assert client.post(paid_url(owed, t1), headers=HEADERS_OF[t1["from_id"]]).status_code == 403  # คนโอนกดเองไม่ได้
+    assert client.post(paid_url(owed, t1), headers=HEADERS_OF[t2["from_id"]]).status_code == 403  # คนไม่เกี่ยว
+    d = client.post(paid_url(owed, t1), headers=HA).json()
+    assert d["transfers"][0]["paid"] is True and d["transfers"][0]["paid_method"] == "receiver"
+    assert d["party"]["status"] == "closed"
+    d = client.post(paid_url(owed, t1), headers=HA).json()  # กดซ้ำ = ยกเลิก
+    assert d["transfers"][0]["paid"] is False
+    client.post(paid_url(owed, t1), headers=HA)
+    d = client.post(paid_url(owed, t2), headers=HA).json()
     assert d["party"]["status"] == "settled"
-    resp = client.post(url.format(t2["id"]), headers=HA)
+    assert client.post(paid_url(owed, t2), headers=HA).status_code == 409
+
+
+def test_slip_with_exact_amount_marks_paid(client, owed, slip):
+    slip["amount"] = 150.0
+    t1 = owed["transfers"][0]
+    resp = upload(client, owed, t1, HEADERS_OF[t1["from_id"]])
+    assert resp.status_code == 200, resp.text
+    t = resp.json()["transfers"][0]
+    assert t["paid"] is True and t["paid_method"] == "slip" and t["can_upload"] is False
+
+
+@pytest.mark.parametrize("amount", [140.0, 150.01, 1500.0])
+def test_slip_wrong_amount_rejected(client, owed, slip, amount):
+    slip["amount"] = amount
+    t1 = owed["transfers"][0]
+    resp = upload(client, owed, t1, HEADERS_OF[t1["from_id"]])
+    assert resp.status_code == 422
+    assert f"{amount:,.2f}" in resp.json()["detail"] and "150.00" in resp.json()["detail"]
+    assert client.get(f"/api/parties/{owed['party']['id']}", headers=HA).json()["transfers"][0]["paid"] is False
+
+
+def test_slip_unreadable_amount_422(client, owed, slip):
+    slip["amount"] = None
+    t1 = owed["transfers"][0]
+    resp = upload(client, owed, t1, HEADERS_OF[t1["from_id"]])
+    assert resp.status_code == 422 and "อ่านยอด" in resp.json()["detail"]
+
+
+def test_slip_only_by_payer(client, owed, slip):
+    slip["amount"] = 150.0
+    t1, t2 = owed["transfers"]
+    assert upload(client, owed, t1, HA).status_code == 403  # คนรับ
+    assert upload(client, owed, t1, HEADERS_OF[t2["from_id"]]).status_code == 403  # คนไม่เกี่ยว
+    assert upload(client, owed, t1, HX).status_code == 404  # คนนอกปาร์ตี้
+
+
+def test_slip_rejects_non_image(client, owed):
+    t1 = owed["transfers"][0]
+    assert upload(client, owed, t1, HEADERS_OF[t1["from_id"]], data=b"%PDF", mime="application/pdf").status_code == 415
+
+
+def test_same_slip_cannot_pay_twice(client, owed, slip):
+    slip["amount"] = 150.0
+    t1, t2 = owed["transfers"]
+    assert upload(client, owed, t1, HEADERS_OF[t1["from_id"]]).status_code == 200
+    resp = upload(client, owed, t2, HEADERS_OF[t2["from_id"]], data=PNG_SLIP + b"x")  # รูปต่าง เลขอ้างอิงเดิม
+    assert resp.status_code == 409 and "สลิป" in resp.json()["detail"]
+    slip["trans_ref"] = None
+    resp = upload(client, owed, t2, HEADERS_OF[t2["from_id"]])  # รูปเดิม
     assert resp.status_code == 409
+
+
+def test_slip_verified_cannot_be_undone(client, owed, slip):
+    slip["amount"] = 150.0
+    t1 = owed["transfers"][0]
+    upload(client, owed, t1, HEADERS_OF[t1["from_id"]])
+    assert upload(client, owed, t1, HEADERS_OF[t1["from_id"]]).status_code == 409  # แนบซ้ำ
+    resp = client.post(paid_url(owed, t1), headers=HA)  # คนรับกดยกเลิก
+    assert resp.status_code == 409 and "สลิป" in resp.json()["detail"]
 
 
 # ---------- slips / pages ----------
