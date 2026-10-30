@@ -351,13 +351,12 @@ legend { padding: 0; }
   display: flex; align-items: center; justify-content: space-between;
   background: #1c1b20; box-shadow: 0 12px 28px -6px rgb(23 22 26 / 28%);
 }
+/* ไอคอนอย่างเดียว ขนาดคงที่ — แท็บที่เลือกเป็นวงกลมขาว (ไม่มีข้อความ ปุ่มจึงไม่ขยับเมื่อสลับหน้า) */
 .tab {
-  display: inline-flex; align-items: center; gap: 8px; height: 52px; padding: 0 14px; border-radius: 999px;
-  color: #a9a6ae; text-decoration: none; font-size: .88rem; font-weight: 600;
+  display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%;
+  color: #a9a6ae; text-decoration: none;
 }
-.tab span { display: none; }
-.tab[aria-current="page"] { background: #fff; color: #17161a; padding: 0 18px 0 16px; }
-.tab[aria-current="page"] span { display: inline; }
+.tab[aria-current="page"] { background: #fff; color: #17161a; }
 .tab-fab {
   display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%;
   background: var(--brand-strong); color: #fff; border: 0; cursor: pointer;
