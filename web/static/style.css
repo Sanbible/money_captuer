@@ -186,7 +186,11 @@ input:focus, select:focus { outline: none; border-color: var(--brand-strong); bo
 input::placeholder { color: var(--muted); font-weight: 400; }
 label, .label-like { display: block; font-size: .82rem; font-weight: 500; color: var(--muted); margin-bottom: 8px; }
 .field { margin: 0; }
-.row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+/* minmax(0, …) + min-width: 0 — iOS Safari ให้ input date/time มีความกว้างขั้นต่ำในตัว ถ้าไม่บีบ แถวจะล้นจอแล้ว sheet เลื่อนข้าง */
+.row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.row > * { min-width: 0; }
+input[type="date"], input[type="time"] { -webkit-appearance: none; appearance: none; min-width: 0; display: block; text-align: left; }
+input::-webkit-date-and-time-value { text-align: left; }
 .form { display: flex; flex-direction: column; gap: 16px; }
 fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 legend { padding: 0; }
@@ -356,7 +360,7 @@ dialog.sheet::backdrop { background: rgb(28 27 32 / 50%); }
 .sheet-handle { flex: none; width: 40px; height: 5px; border-radius: 3px; background: var(--line); margin: 12px auto 0; }
 .sheet-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 20px 4px; }
 .sheet-head h2 { flex: 1; font-size: 1.1rem; font-weight: 700; padding-left: 52px; text-align: center; }
-.sheet-body { overflow-y: auto; padding: 12px 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+.sheet-body { overflow-y: auto; overflow-x: hidden; padding: 12px 20px 24px; display: flex; flex-direction: column; gap: 16px; }
 .sheet-body.tinted { background: var(--bg); }
 .sheet-actions {
   flex: none; display: flex; gap: 12px; padding: 14px 20px max(20px, env(safe-area-inset-bottom));
